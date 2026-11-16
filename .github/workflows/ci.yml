@@ -1,0 +1,151 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+# 同一分支的新提交取消旧任务，避免排队浪费额度。
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rust:
+    name: rust (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Rust 工具链
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      # 格式只在单一平台检查，避免三份完全相同的失败信息。
+      - name: 格式检查
+        if: matrix.os == 'ubuntu-latest'
+        run: cargo fmt --all --check
+
+      - name: Clippy（warnings 视为错误）
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: 单元测试
+        run: cargo test --workspace --all-targets
+
+  spec:
+    name: 契约校验
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 安装 PyYAML
+        run: python3 -m pip install --quiet pyyaml
+
+      - name: 校验 openapi 与错误码一致性
+        run: python3 scripts/check-spec.py
+
+      - name: 校验版本一致性（Cargo / pubspec / appVersion / openapi）
+        run: python3 scripts/check-versions.py
+
+  audit:
+    name: 依赖安全
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: rustsec/audit-check@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+  flutter:
+    name: flutter (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    defaults:
+      run:
+        working-directory: jarvis-app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: 安装依赖
+        run: flutter pub get
+
+      - name: 静态检查
+        run: flutter analyze
+
+      - name: Widget 测试
+        run: flutter test
+
+  package-macos:
+    name: 打包（macOS，未签名）
+    runs-on: macos-latest
+    needs: [rust, spec]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Rust 工具链
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: 生成 pkg
+        run: ./scripts/package-macos.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-pkg-unsigned
+          path: |
+            dist/*.pkg
+            dist/*.sha256
+
+  package-linux:
+    name: 打包（Linux，tar.gz）
+    runs-on: ubuntu-latest
+    needs: [rust, spec]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Rust 工具链
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: 构建 release 二进制
+        run: cargo build --release -p jarvis-service -p jarvis-worker
+
+      - name: 打包
+        run: |
+          VERSION=$(python3 scripts/check-versions.py | tail -1 | sed 's/.*：//')
+          mkdir -p dist/personal-agent-$VERSION-linux-x86_64/usr/local/bin
+          cp target/release/jarvis-service target/release/jarvis-worker \
+             dist/personal-agent-$VERSION-linux-x86_64/usr/local/bin/
+          tar -C dist -czf dist/personal-agent-$VERSION-linux-x86_64.tar.gz \
+             personal-agent-$VERSION-linux-x86_64
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-tarball-unsigned
+          path: dist/*.tar.gz

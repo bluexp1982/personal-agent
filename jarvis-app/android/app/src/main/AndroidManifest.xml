@@ -1,0 +1,70 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 必须写在 main 清单里：Flutter 模板只在 debug/profile 清单里给 INTERNET，
+         正式包缺这条会表现为"所有请求立即失败"，且日志里看不出是权限问题。 -->
+    <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- 录音笔记采集麦克风。插件 record_android 的清单里也有这条，会合并进来；
+         这里显式声明是为了让正式包的权限在 main 清单里可见，便于审计与商店申报。 -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+    <!-- 锁屏/切后台继续录音：Android 8.0 起后台进程会被降权并掐掉 AudioRecord，
+         录音期间必须挂一个前台服务。类型声明为 microphone 是 Android 14+
+         的硬性要求：没有它，带麦克风采集的前台服务会在 startForeground 时抛
+         SecurityException。 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE"/>
+    <!-- Android 13+ 前台服务的常驻通知需要运行时授权才可见；未授权时服务照旧
+         运行、录音不受影响，只是通知不显示，所以不做强制请求。 -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <application
+        android:label="Jarvis"
+        android:name="${applicationName}"
+        android:icon="@mipmap/ic_launcher"
+        android:usesCleartextTraffic="false"
+        android:networkSecurityConfig="@xml/network_security_config">
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:taskAffinity=""
+            android:theme="@style/LaunchTheme"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
+            android:hardwareAccelerated="true"
+            android:windowSoftInputMode="adjustResize">
+            <!-- Specifies an Android theme to apply to this Activity as soon as
+                 the Android process has started. This theme is visible to the user
+                 while the Flutter UI initializes. After that, this theme continues
+                 to determine the Window background behind the Flutter UI. -->
+            <meta-data
+              android:name="io.flutter.embedding.android.NormalTheme"
+              android:resource="@style/NormalTheme"
+              />
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity>
+        <!-- 录音期间的保活服务：只是前台服务壳子，音频采集仍在 Flutter 侧
+             （record 插件持有 AudioRecord），它让进程在锁屏/后台不被系统回收。
+             `stopWithTask` 保持默认 false 之外不额外配置——任务被划掉时进程
+             也随之结束，通知不会残留成"在录却没数据"的假象。 -->
+        <service
+            android:name=".RecordingForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
+        <!-- Don't delete the meta-data below.
+             This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
+        <meta-data
+            android:name="flutterEmbedding"
+            android:value="2" />
+    </application>
+    <!-- Required to query activities that can process text, see:
+         https://developer.android.com/training/package-visibility and
+         https://developer.android.com/reference/android/content/Intent#ACTION_PROCESS_TEXT.
+
+         In particular, this is used by the Flutter engine in io.flutter.plugin.text.ProcessTextPlugin. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.PROCESS_TEXT"/>
+            <data android:mimeType="text/plain"/>
+        </intent>
+    </queries>
+</manifest>

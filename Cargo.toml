@@ -1,0 +1,104 @@
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.14.0"
+edition = "2021"
+license = "MIT"
+license-file = "LICENSE"
+
+# 统一 lint 基线：CI 用 `-D warnings` 把这里的所有 warn 变成错误，
+# 各 crate 只需 `[lints] workspace = true`，新加 crate 不会漏检查。
+[workspace.lints.rust]
+unsafe_code = "forbid"
+unreachable_pub = "warn"
+missing_debug_implementations = "warn"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+todo = "warn"
+dbg_macro = "warn"
+print_stdout = "warn"
+
+[workspace.dependencies]
+protocol = { path = "crates/protocol" }
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+clap = { version = "4", features = ["derive", "env"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "net", "time", "fs", "process", "io-util", "sync"] }
+# `ws` 只为 `/api/ssh` 的 SSH 隧道开启：它是一条纯字节透传的 WebSocket，
+# 不解析 SSH 协议，加密与认证全部留在客户端。
+axum = { version = "0.8", features = ["ws"] }
+# 工具侧解码网页编码（GBK/GB18030 等）。`reqwest` 只处理 UTF-8 文本。
+encoding_rs = "0.8"
+# 文件工具：按文件名找文件、按内容找代码。
+# 不调外部 `rg`：Windows 上不一定装得到，进程超时与 `--json` 解析也都要自己管。
+globset = "0.4"
+ignore = "0.4"
+regex = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+
+sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "sqlite", "migrate", "macros"] }
+daemon-kit = "0.1"
+
+hyper = { version = "1", features = ["http1", "server", "client"] }
+hyper-util = { version = "0.1", features = ["tokio", "server-auto", "service"] }
+http-body-util = "0.1"
+rand = "0.9"
+futures-util = { version = "0.3", default-features = false, features = ["std", "async-await"] }
+
+# 只用来 killpg：取消编码任务时必须杀整个进程组，否则 CLI 拉起的子进程会变孤儿。
+# 不自己写 unsafe（workspace 里 `unsafe_code = "forbid"`）。
+nix = { version = "0.29", features = ["signal", "process"] }
+
+ed25519-dalek = "2"
+sha2 = "0.10"
+base32 = "0.5"
+subtle = "2"
+
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "json", "multipart"] }
+# 录音归档下载：把多个分段文件拼成一个流式响应，不把整段音频读进内存。
+tokio-util = { version = "0.7", features = ["io"] }
+# 录音分段的 chat/audio 形态需要把 WAV 编成 data URL 再发给 ASR。
+base64 = "0.22"
+# trait 里带 async 方法又要能放进 `dyn`，只能显式装箱。
+async-trait = "0.1"
+
+# 自签 TLS：与 reqwest 已有的 rustls 栈一致，不再引入 OpenSSL。
+# 不用 axum-server：它会引入第二套 graceful shutdown，且不暴露 local_addr（破坏 api.port 对 :0 的发现）。
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
+rcgen = { version = "0.14", default-features = false, features = ["crypto", "ring", "pem"] }
+
+tempfile = "3"
+tower = { version = "0.5", features = ["util"] }
+
+# 总结语音的波形峰值：只需要把已落盘的 mp3/wav 解成 PCM 取包络，
+# 不重采样、不写文件，所以关掉默认的 flac/ogg/mkv 等全部格式。
+symphonia = { version = "0.5", default-features = false, features = ["mp3", "wav", "pcm"] }
+
+# 技能包（.zip）解包。只开 deflate：zstd/bzip2/aes 这些既是攻击面也是构建时间，
+# 而技能包是文本与 md，几乎没有压缩比压力。
+zip = { version = "9", default-features = false, features = ["deflate"] }
+
+# 构建产物体积控制：crates/jarvis-service/tests 下每个 *.rs 都是独立 crate，
+# 各自把整棵依赖树（axum/sqlx/rustls/symphonia…）静态链一遍，dev 默认的
+# debug = 2 会给每个目标文件和 rlib 写入全量 DWARF，target/debug/deps 能涨到 100GB+。
+# 折中方案：自己的代码留行级调试信息（够断点、回溯能看到行号），
+# 第三方依赖一律不带——依赖的调试信息体积占比最大，且基本用不到。
+[profile.dev]
+debug = 1
+
+[profile.dev.package."*"]
+debug = false
+
+# test 默认继承 dev，这里显式写出，避免以后有人只改 dev 时两者行为不一致。
+[profile.test]
+debug = 1
+
+[profile.test.package."*"]
+debug = false

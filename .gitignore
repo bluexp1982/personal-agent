@@ -1,0 +1,57 @@
+# Rust
+/target
+**/*.rs.bk
+
+# 本地运行数据（M1 起产生）
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+.env
+
+# Flutter
+.dart_tool/
+.packages
+.flutter-plugins
+.flutter-plugins-dependencies
+**/build/
+**/Pods/
+**/.symlinks/
+**/ephemeral/
+jarvis-app/macos/Flutter/ephemeral/
+jarvis-app/windows/flutter/ephemeral/
+jarvis-app/linux/flutter/ephemeral/
+
+# Python（scripts/*.py 运行后产生的字节码）
+__pycache__/
+*.py[cod]
+
+# Gradle / Kotlin / IDE 的本地构建状态（Flutter android 首次构建就会产生）
+**/.gradle/
+**/.kotlin/
+**/local.properties
+*.iml
+
+# 编辑器与系统
+.DS_Store
+.idea/
+.vscode/
+
+# AI 助手的本地计划/会话记录（含本机路径与内部规划，不入库）
+.codebuddy/
+# AI 生图工具的输出目录
+/generated-images/
+# 打包产物
+dist/
+
+# 临时文件
+/temps
+/work
+/spike
+
+# dev.sh 的本地数据与配置（含数据库、身份密钥、产物）
+/.dev/
+
+# Node（本项目不用；防误在根目录跑 pnpm/npm 留下垃圾）
+/node_modules/
+/pnpm-lock.yaml

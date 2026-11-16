@@ -1,0 +1,31 @@
+[package]
+name = "jarvis-worker"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "长任务执行进程：由 jarvis-service 拉起并监督，不对外暴露端点"
+
+[[bin]]
+name = "jarvis-worker"
+path = "src/main.rs"
+
+[dependencies]
+protocol.workspace = true
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+thiserror.workspace = true
+reqwest.workspace = true
+# 页面编码解码：中文站点常见 GBK/GB18030，`reqwest` 只做 UTF-8。
+encoding_rs.workspace = true
+nix.workspace = true
+
+[dev-dependencies]
+# 插件目录加载的测试要真建目录与 sidecar。
+tempfile.workspace = true
+
+[lints]
+workspace = true

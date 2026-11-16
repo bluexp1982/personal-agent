@@ -1,0 +1,50 @@
+{"id":"g01","kind":"profile","content":"常住示例市东城区","days_ago":3,"sensitivity":"normal","expect":"visible"}
+{"id":"g02","kind":"profile","content":"在示例行业做项目协调","days_ago":5,"sensitivity":"normal","expect":"visible"}
+{"id":"g03","kind":"profile","content":"家里养了一只柴犬","days_ago":9,"sensitivity":"normal","expect":"visible"}
+{"id":"g04","kind":"profile","content":"大学读的是图书馆学","days_ago":12,"sensitivity":"normal","expect":"visible"}
+{"id":"g05","kind":"profile","content":"老家在临江县城","days_ago":20,"sensitivity":"normal","expect":"visible"}
+{"id":"g06","kind":"preference","content":"回答先给结论再给依据","days_ago":1,"sensitivity":"normal","expect":"visible"}
+{"id":"g07","kind":"preference","content":"讨厌啰嗦的解释","days_ago":2,"sensitivity":"normal","expect":"visible"}
+{"id":"g08","kind":"preference","content":"喜欢用表格对比方案","days_ago":4,"sensitivity":"normal","expect":"visible"}
+{"id":"g09","kind":"preference","content":"只喝茶不喝咖啡","days_ago":6,"sensitivity":"normal","expect":"visible"}
+{"id":"g10","kind":"preference","content":"每周三下午有空","days_ago":7,"sensitivity":"normal","expect":"visible"}
+{"id":"g11","kind":"preference","content":"不喜欢电话沟通","days_ago":8,"sensitivity":"normal","expect":"visible"}
+{"id":"g12","kind":"preference","content":"偏好深色主题","days_ago":10,"sensitivity":"normal","expect":"visible"}
+{"id":"g13","kind":"preference","content":"习惯用快捷键","days_ago":11,"sensitivity":"normal","expect":"visible"}
+{"id":"g14","kind":"preference","content":"喜欢先看示例再看文档","days_ago":13,"sensitivity":"normal","expect":"visible"}
+{"id":"g15","kind":"preference","content":"讨厌临时改需求","days_ago":15,"sensitivity":"normal","expect":"visible"}
+{"id":"g16","kind":"preference","content":"偏好小步提交","days_ago":18,"sensitivity":"normal","expect":"visible"}
+{"id":"g17","kind":"profile","content":"久坐容易腰酸","days_ago":22,"sensitivity":"normal","expect":"visible"}
+{"id":"g18","kind":"preference","content":"不吃香菜","days_ago":25,"sensitivity":"normal","expect":"visible"}
+{"id":"g19","kind":"preference","content":"不喝酒","days_ago":26,"sensitivity":"normal","expect":"visible"}
+{"id":"g20","kind":"profile","content":"每年做一次牙科检查","days_ago":28,"sensitivity":"normal","expect":"visible"}
+{"id":"g21","kind":"profile","content":"每月固定支出三千五","days_ago":3,"sensitivity":"private","expect":"hidden"}
+{"id":"g22","kind":"profile","content":"体检有一项指标要复查","days_ago":4,"sensitivity":"private","expect":"hidden"}
+{"id":"g23","kind":"preference","content":"工资卡是示例银行的","days_ago":5,"sensitivity":"private","expect":"hidden"}
+{"id":"g24","kind":"profile","content":"有一份商业保险","days_ago":6,"sensitivity":"private","expect":"hidden"}
+{"id":"g25","kind":"event","content":"上个月和朋友去看了展览","days_ago":1,"sensitivity":"private","expect":"hidden"}
+{"id":"g26","kind":"preference","content":"信用卡额度三万","days_ago":2,"sensitivity":"private","expect":"hidden"}
+{"id":"g27","kind":"profile","content":"社保在示例市交","days_ago":7,"sensitivity":"private","expect":"hidden"}
+{"id":"g28","kind":"event","content":"年终奖发在了一月","days_ago":9,"sensitivity":"private","expect":"hidden"}
+{"id":"g29","kind":"event","content":"上周处理了一次线上告警","days_ago":2,"sensitivity":"normal","expect":"visible"}
+{"id":"g30","kind":"event","content":"昨天和产品对齐了记忆范围","days_ago":1,"sensitivity":"normal","expect":"visible"}
+{"id":"g31","kind":"event","content":"这周一评审了表结构","days_ago":3,"sensitivity":"normal","expect":"visible"}
+{"id":"g32","kind":"event","content":"上周四重建了测试环境","days_ago":5,"sensitivity":"normal","expect":"visible"}
+{"id":"g33","kind":"event","content":"十月去北京出差三天","days_ago":10,"sensitivity":"normal","expect":"visible"}
+{"id":"g34","kind":"event","content":"九月完成等保测评","days_ago":20,"sensitivity":"normal","expect":"visible"}
+{"id":"g35","kind":"event","content":"这个周末打算去爬山","days_ago":28,"sensitivity":"normal","expect":"visible"}
+{"id":"g36","kind":"event","content":"明天上午面试一个后端","days_ago":0,"sensitivity":"normal","expect":"visible"}
+{"id":"g37","kind":"event","content":"去年底做过一次性能压测","days_ago":200,"sensitivity":"normal","expect":"hidden"}
+{"id":"g38","kind":"event","content":"半年前搬了新办公室","days_ago":180,"sensitivity":"normal","expect":"hidden"}
+{"id":"g39","kind":"event","content":"去年前端从 Vue 换成 Flutter","days_ago":300,"sensitivity":"normal","expect":"hidden"}
+{"id":"g40","kind":"event","content":"两年前把仓库从 SVN 迁到 Git","days_ago":700,"sensitivity":"normal","expect":"hidden"}
+{"id":"g41","kind":"event","content":"很久以前做过一次灾备演练","days_ago":400,"sensitivity":"normal","expect":"hidden"}
+{"id":"g42","kind":"event","content":"去年把监控从 Zabbix 换掉","days_ago":150,"sensitivity":"normal","expect":"hidden"}
+{"id":"g43","kind":"project","content":"这个服务的时间统一用毫秒","days_ago":3,"project":"ws_a","sensitivity":"normal","expect":"visible"}
+{"id":"g44","kind":"project","content":"错误码集中在 protocol","days_ago":8,"project":"ws_a","sensitivity":"normal","expect":"visible"}
+{"id":"g45","kind":"project","content":"迁移只前滚不写 down","days_ago":15,"project":"ws_a","sensitivity":"normal","expect":"visible"}
+{"id":"g46","kind":"project","content":"颜色字号只从 core/design 取","days_ago":20,"project":"ws_a","sensitivity":"normal","expect":"visible"}
+{"id":"g47","kind":"project","content":"提交前必须跑 flutter analyze","days_ago":25,"project":"ws_a","sensitivity":"normal","expect":"visible"}
+{"id":"g48","kind":"project","content":"表名断言写在 db.rs 测试里","days_ago":28,"project":"ws_a","sensitivity":"normal","expect":"visible"}
+{"id":"g49","kind":"project","content":"别的仓库的分支命名规则","days_ago":3,"project":"ws_b","sensitivity":"normal","expect":"hidden"}
+{"id":"g50","kind":"project","content":"别的仓库的发布节奏","days_ago":10,"project":"ws_b","sensitivity":"normal","expect":"hidden"}

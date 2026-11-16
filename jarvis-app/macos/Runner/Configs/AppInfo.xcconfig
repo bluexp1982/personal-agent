@@ -1,0 +1,21 @@
+// Application-level settings for the Runner target.
+//
+// This may be replaced with something auto-generated from metadata (e.g., pubspec.yaml) in the
+// future. If not, the values below would default to using the project name when this becomes a
+// 'flutter create' template.
+
+// The application's name. By default this is also the title of the Flutter window.
+//
+// 这里决定的是**产物名**（Jarvis.app / Contents/MacOS/Jarvis），Dock 悬停提示与
+// 启动台读的就是它；Dart 包名仍是 `jarvis_app`（pubspec 与 import 不动）。
+// Info.plist 的 CFBundleName / CFBundleDisplayName 也写死为 Jarvis（菜单栏与关于面板用它）。
+PRODUCT_NAME = Jarvis
+
+// The application's bundle identifier（Release / Profile 用这个）
+// Debug 构建**不**用这里的值：Runner target 的 Debug 配置在 project.pbxproj 里
+// 覆盖成 `com.personalagent.jarvisApp.dev`，让开发版与正式版各有一份沙箱容器，
+// 否则两边共用一个 secrets.json，server_url 与配对令牌会互相覆盖。
+PRODUCT_BUNDLE_IDENTIFIER = com.personalagent.jarvisApp
+
+// The copyright displayed in application information
+PRODUCT_COPYRIGHT = Copyright © 2026 com.personalagent. All rights reserved.

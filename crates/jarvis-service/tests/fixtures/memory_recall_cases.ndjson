@@ -1,0 +1,230 @@
+{"type":"memory","id":"m001","content":"回答先给结论再给依据"}
+{"type":"memory","id":"m002","content":"讨厌啰嗦的解释"}
+{"type":"memory","id":"m003","content":"喜欢用表格对比方案"}
+{"type":"memory","id":"m004","content":"不吃香菜"}
+{"type":"memory","id":"m005","content":"不吃辣"}
+{"type":"memory","id":"m006","content":"对花生过敏"}
+{"type":"memory","id":"m007","content":"只喝茶不喝咖啡"}
+{"type":"memory","id":"m008","content":"每天早上七点起床"}
+{"type":"memory","id":"m009","content":"习惯晚上十一点睡觉"}
+{"type":"memory","id":"m010","content":"每周三下午有空"}
+{"type":"memory","id":"m011","content":"每周五晚上去游泳"}
+{"type":"memory","id":"m012","content":"喜欢看悬疑小说"}
+{"type":"memory","id":"m013","content":"不喜欢开会"}
+{"type":"memory","id":"m014","content":"更信任具体数字"}
+{"type":"memory","id":"m015","content":"喜欢先看示例再看文档"}
+{"type":"memory","id":"m016","content":"讨厌重复解释同一件事"}
+{"type":"memory","id":"m017","content":"习惯用快捷键不用鼠标"}
+{"type":"memory","id":"m018","content":"偏好深色主题"}
+{"type":"memory","id":"m019","content":"编辑器用 Neovim"}
+{"type":"memory","id":"m020","content":"终端用 zsh 加 tmux"}
+{"type":"memory","id":"m021","content":"喜欢把长文拆成小段"}
+{"type":"memory","id":"m022","content":"不喜欢电话沟通只喜欢文字"}
+{"type":"memory","id":"m023","content":"需要提前一天预约"}
+{"type":"memory","id":"m024","content":"讨厌临时改需求"}
+{"type":"memory","id":"m025","content":"喜欢在早上处理复杂问题"}
+{"type":"memory","id":"m026","content":"习惯记录每天的待办"}
+{"type":"memory","id":"m027","content":"不喜欢被追问细节"}
+{"type":"memory","id":"m028","content":"偏好小步提交"}
+{"type":"memory","id":"m029","content":"讨厌超过三十行的函数"}
+{"type":"memory","id":"m030","content":"喜欢先写测试再写实现"}
+{"type":"memory","id":"m031","content":"常住示例市东城区"}
+{"type":"memory","id":"m032","content":"老家在临江县城"}
+{"type":"memory","id":"m033","content":"生日是三月十二日"}
+{"type":"memory","id":"m034","content":"大学在示例大学读计算机"}
+{"type":"memory","id":"m035","content":"会说中文和英文"}
+{"type":"memory","id":"m036","content":"普通话带一点南方口音"}
+{"type":"memory","id":"m037","content":"家里养了一只柴犬叫豆豆"}
+{"type":"memory","id":"m038","content":"配偶是小学老师"}
+{"type":"memory","id":"m039","content":"儿子二零二一年出生"}
+{"type":"memory","id":"m040","content":"女儿在学钢琴"}
+{"type":"memory","id":"m041","content":"有轻微颈椎病"}
+{"type":"memory","id":"m042","content":"每年体检一次"}
+{"type":"memory","id":"m043","content":"身高一米七八"}
+{"type":"memory","id":"m044","content":"不喝酒"}
+{"type":"memory","id":"m045","content":"喜欢跑步每次五公里"}
+{"type":"memory","id":"m046","content":"在示例行业做项目协调"}
+{"type":"memory","id":"m047","content":"团队有八个人"}
+{"type":"memory","id":"m048","content":"直接向 CTO 汇报"}
+{"type":"memory","id":"m049","content":"不用微信只用飞书"}
+{"type":"memory","id":"m050","content":"邮箱用个人域名"}
+{"type":"memory","id":"m051","content":"主力机器是 MacBook Pro 十四寸 M3"}
+{"type":"memory","id":"m052","content":"家里有一台群晖 NAS"}
+{"type":"memory","id":"m053","content":"NAS 地址是 192.168.1.20"}
+{"type":"memory","id":"m054","content":"路由器是华硕 AX86U"}
+{"type":"memory","id":"m055","content":"开发用的键盘是 HHKB"}
+{"type":"memory","id":"m056","content":"显示器是戴尔 U2723QE"}
+{"type":"memory","id":"m057","content":"生产服务器在示例云华东区"}
+{"type":"memory","id":"m058","content":"生产服务器是四核八G"}
+{"type":"memory","id":"m059","content":"测试服务器是两台旧笔记本"}
+{"type":"memory","id":"m060","content":"手机是 iPhone 十五"}
+{"type":"memory","id":"m061","content":"平板是 iPad Air"}
+{"type":"memory","id":"m062","content":"开发环境用 Docker 跑依赖"}
+{"type":"memory","id":"m063","content":"数据库客户端用 DataGrip"}
+{"type":"memory","id":"m064","content":"接口调试用 Bruno"}
+{"type":"memory","id":"m065","content":"笔记软件用 Obsidian"}
+{"type":"memory","id":"m066","content":"任务管理用 Linear"}
+{"type":"memory","id":"m067","content":"代码托管在自建 GitLab"}
+{"type":"memory","id":"m068","content":"CI 用 GitHub Actions"}
+{"type":"memory","id":"m069","content":"监控用 Grafana 加 Prometheus"}
+{"type":"memory","id":"m070","content":"日志落在 /var/log/personal-agent"}
+{"type":"memory","id":"m071","content":"家用宽带上行一百兆"}
+{"type":"memory","id":"m072","content":"有一台旧 ThinkPad 做备用机"}
+{"type":"memory","id":"m073","content":"打印机是惠普 M232"}
+{"type":"memory","id":"m074","content":"耳机是索尼 WH-1000XM5"}
+{"type":"memory","id":"m075","content":"工位靠窗"}
+{"type":"memory","id":"m076","content":"这个服务的时间统一用毫秒"}
+{"type":"memory","id":"m077","content":"后端错误码集中在 protocol 的 error.rs"}
+{"type":"memory","id":"m078","content":"接口文档以 openapi.yaml 为准"}
+{"type":"memory","id":"m079","content":"数据库用 SQLite 加 WAL"}
+{"type":"memory","id":"m080","content":"迁移只前滚不写 down"}
+{"type":"memory","id":"m081","content":"客户端用 Flutter 加 Riverpod"}
+{"type":"memory","id":"m082","content":"颜色和字号只能从 core/design 取"}
+{"type":"memory","id":"m083","content":"测试要排除 theme_settings_test"}
+{"type":"memory","id":"m084","content":"提交前必须跑 flutter analyze"}
+{"type":"memory","id":"m085","content":"Rust 格式化用 rustfmt 默认配置"}
+{"type":"memory","id":"m086","content":"这个仓库禁止使用 unsafe"}
+{"type":"memory","id":"m087","content":"每个端点都要写幂等和分页说明"}
+{"type":"memory","id":"m088","content":"表名断言写在 db.rs 的测试里"}
+{"type":"memory","id":"m089","content":"会话消息落库走 append_assistant_with_sources"}
+{"type":"memory","id":"m090","content":"审批决策权只在服务端"}
+{"type":"memory","id":"m091","content":"编码任务不进主进程"}
+{"type":"memory","id":"m092","content":"任务状态机只有服务端能改"}
+{"type":"memory","id":"m093","content":"审计只记元数据不记正文"}
+{"type":"memory","id":"m094","content":"密码和密钥永不入库"}
+{"type":"memory","id":"m095","content":"录音分段按五分钟切"}
+{"type":"memory","id":"m096","content":"语音总结默认三百字"}
+{"type":"memory","id":"m097","content":"项目路径必须校验边界"}
+{"type":"memory","id":"m098","content":"文件名统一小写下划线"}
+{"type":"memory","id":"m099","content":"提交信息用中文写清动机"}
+{"type":"memory","id":"m100","content":"分支命名用 feat 加短横线"}
+{"type":"memory","id":"m101","content":"报销走飞书审批"}
+{"type":"memory","id":"m102","content":"出差报销需要发票原件"}
+{"type":"memory","id":"m103","content":"采购超过五千要三家比价"}
+{"type":"memory","id":"m104","content":"请假提前三天在系统提"}
+{"type":"memory","id":"m105","content":"周报每周五下午提交"}
+{"type":"memory","id":"m106","content":"代码评审至少一个人通过"}
+{"type":"memory","id":"m107","content":"上线窗口只在周二和周四"}
+{"type":"memory","id":"m108","content":"数据库变更要写回滚方案"}
+{"type":"memory","id":"m109","content":"线上问题先止血再定位"}
+{"type":"memory","id":"m110","content":"需求变更要走变更单"}
+{"type":"memory","id":"m111","content":"建筑 ERP 的项目按标段拆"}
+{"type":"memory","id":"m112","content":"合同的金额字段用分为单位"}
+{"type":"memory","id":"m113","content":"工程量清单导出 Excel"}
+{"type":"memory","id":"m114","content":"发票识别用第三方 OCR"}
+{"type":"memory","id":"m115","content":"材料库同步每天凌晨跑"}
+{"type":"memory","id":"m116","content":"权限模型是角色加数据范围"}
+{"type":"memory","id":"m117","content":"组织架构最多五层"}
+{"type":"memory","id":"m118","content":"审批流支持会签和或签"}
+{"type":"memory","id":"m119","content":"移动端只做审批和查看"}
+{"type":"memory","id":"m120","content":"部署用单机加定时备份"}
+{"type":"memory","id":"m121","content":"十月二十四日与 A 公司谈续约卡在价格"}
+{"type":"memory","id":"m122","content":"上个月把报销流程迁到了飞书"}
+{"type":"memory","id":"m123","content":"九月十日给团队做了一次架构分享"}
+{"type":"memory","id":"m124","content":"上周去医院复查了颈椎"}
+{"type":"memory","id":"m125","content":"十月一日全家去千岛湖玩"}
+{"type":"memory","id":"m126","content":"八月换了新手机"}
+{"type":"memory","id":"m127","content":"七月搬了新办公室"}
+{"type":"memory","id":"m128","content":"六月招了两个后端"}
+{"type":"memory","id":"m129","content":"五月把 CI 从 Jenkins 换到 GitHub Actions"}
+{"type":"memory","id":"m130","content":"三月上线了审批模块"}
+{"type":"memory","id":"m131","content":"二月修了一次数据库死锁"}
+{"type":"memory","id":"m132","content":"一月定了今年的技术方向"}
+{"type":"memory","id":"m133","content":"去年底做了一次性能压测"}
+{"type":"memory","id":"m134","content":"昨天和产品对齐了记忆系统范围"}
+{"type":"memory","id":"m135","content":"前天写了记忆系统的方案文档"}
+{"type":"memory","id":"m136","content":"这周一评审了记忆系统的表结构"}
+{"type":"memory","id":"m137","content":"上周五和 B 公司开了视频会"}
+{"type":"memory","id":"m138","content":"十月中旬去北京出差三天"}
+{"type":"memory","id":"m139","content":"九月把家里的宽带升了级"}
+{"type":"memory","id":"m140","content":"八月给豆豆做了驱虫"}
+{"type":"memory","id":"m141","content":"七月儿子上了幼儿园"}
+{"type":"memory","id":"m142","content":"六月全家去了一趟厦门"}
+{"type":"memory","id":"m143","content":"五月买了新的办公椅"}
+{"type":"memory","id":"m144","content":"四月把 NAS 硬盘换成了四块八T"}
+{"type":"memory","id":"m145","content":"三月给团队涨了薪"}
+{"type":"memory","id":"m146","content":"二月把监控从 Zabbix 换到 Grafana"}
+{"type":"memory","id":"m147","content":"一月把日志收进了 Loki"}
+{"type":"memory","id":"m148","content":"昨天处理了一次线上告警"}
+{"type":"memory","id":"m149","content":"前天和甲方确认了二期范围"}
+{"type":"memory","id":"m150","content":"这周三下午开了需求澄清会"}
+{"type":"memory","id":"m151","content":"上周四把测试环境重建了"}
+{"type":"memory","id":"m152","content":"十月初定下了明年的预算"}
+{"type":"memory","id":"m153","content":"九月底完成了等保测评"}
+{"type":"memory","id":"m154","content":"八月中做了一次灾备演练"}
+{"type":"memory","id":"m155","content":"七月初上线了移动端"}
+{"type":"memory","id":"m156","content":"六月中把审批流改成可配置"}
+{"type":"memory","id":"m157","content":"五月底修完了安全扫描的高危项"}
+{"type":"memory","id":"m158","content":"四月中把仓库从 SVN 迁到 Git"}
+{"type":"memory","id":"m159","content":"三月初定了编码规范"}
+{"type":"memory","id":"m160","content":"二月中做了第一次用户培训"}
+{"type":"memory","id":"m161","content":"一月初把服务换成了单进程"}
+{"type":"memory","id":"m162","content":"昨天看了三篇关于记忆检索的论文"}
+{"type":"memory","id":"m163","content":"前天和朋友去看了展览"}
+{"type":"memory","id":"m164","content":"这周末打算去爬山"}
+{"type":"memory","id":"m165","content":"下周要去上海参加行业会议"}
+{"type":"memory","id":"m166","content":"明天上午十点面试一个后端"}
+{"type":"memory","id":"m167","content":"周三下午两点评审合同"}
+{"type":"memory","id":"m168","content":"周五之前提交周报"}
+{"type":"memory","id":"m169","content":"月底前完成等保整改"}
+{"type":"memory","id":"m170","content":"下周一要给客户演示"}
+{"type":"memory","id":"m171","content":"每个月一号交房租"}
+{"type":"memory","id":"m172","content":"每年三月续车险"}
+{"type":"memory","id":"m173","content":"每季度末盘点资产"}
+{"type":"memory","id":"m174","content":"每周一上午开团队会"}
+{"type":"memory","id":"m175","content":"每天下午五点看一次告警"}
+{"type":"memory","id":"m176","content":"十月三十一日前提交预算"}
+{"type":"memory","id":"m177","content":"十一月要交年度总结"}
+{"type":"memory","id":"m178","content":"十二月安排年度体检"}
+{"type":"memory","id":"m179","content":"下个月要还一笔房贷"}
+{"type":"memory","id":"m180","content":"每周日晚上整理下周计划"}
+{"type":"memory","id":"m181","content":"A 公司的对接人是王工"}
+{"type":"memory","id":"m182","content":"B 公司的对接人是李经理"}
+{"type":"memory","id":"m183","content":"甲方的项目负责人是张总"}
+{"type":"memory","id":"m184","content":"团队里前端是小陈"}
+{"type":"memory","id":"m185","content":"团队里测试是老周"}
+{"type":"memory","id":"m186","content":"法务是刘律师"}
+{"type":"memory","id":"m187","content":"财务是赵会计"}
+{"type":"memory","id":"m188","content":"房东姓孙"}
+{"type":"memory","id":"m189","content":"儿子的班主任是陈老师"}
+{"type":"memory","id":"m190","content":"常去的牙医是吴医生"}
+{"type":"memory","id":"m191","content":"供应商里最靠谱的是鼎盛建材"}
+{"type":"memory","id":"m192","content":"云厂商的客户经理是周工"}
+{"type":"memory","id":"m193","content":"合作的设计公司是青禾"}
+{"type":"memory","id":"m194","content":"外包团队负责人是老徐"}
+{"type":"memory","id":"m195","content":"大学室友叫胖子现在在深圳"}
+{"type":"memory","id":"m196","content":"配偶的妹妹在银行工作"}
+{"type":"memory","id":"m197","content":"邻居是退休的中学老师"}
+{"type":"memory","id":"m198","content":"健身教练姓何"}
+{"type":"memory","id":"m199","content":"装修队长是老王"}
+{"type":"memory","id":"m200","content":"以前同事小刘去了字节"}
+{"type":"case","query":"报销走哪个系统","expect":["m101","m122"]}
+{"type":"case","query":"我上次说的那台机器什么配置","expect":["m051"]}
+{"type":"case","query":"出差报销需要发票吗","expect":["m102"]}
+{"type":"case","query":"我家的 NAS 地址是多少","expect":["m053"]}
+{"type":"case","query":"颈椎复查结果怎么样","expect":["m041","m124"]}
+{"type":"case","query":"数据库用什么","expect":["m079"]}
+{"type":"case","query":"迁移能不能回滚","expect":["m080"]}
+{"type":"case","query":"提交前要跑哪些检查","expect":["m084"]}
+{"type":"case","query":"颜色和字号规范从哪里取","expect":["m082"]}
+{"type":"case","query":"我吃什么会过敏","expect":["m006"]}
+{"type":"case","query":"我早上几点起床","expect":["m008"]}
+{"type":"case","query":"周三下午有没有空","expect":["m010"]}
+{"type":"case","query":"家里的狗叫什么名字","expect":["m037"]}
+{"type":"case","query":"儿子是哪年出生的","expect":["m039"]}
+{"type":"case","query":"主力机器是什么型号","expect":["m051"]}
+{"type":"case","query":"路由器是什么型号","expect":["m054"]}
+{"type":"case","query":"接口文档以什么为准","expect":["m078"]}
+{"type":"case","query":"团队一共有几个人","expect":["m047"]}
+{"type":"case","query":"错误码放在哪个文件","expect":["m077"]}
+{"type":"case","query":"下周有什么安排","expect":["m170"]}
+{"type":"case","query":"报销","expect":["m101"],"tags":["two_char"]}
+{"type":"case","query":"东城","expect":["m031"],"tags":["two_char"]}
+{"type":"case","query":"飞书","expect":["m049","m101","m122"],"tags":["two_char"]}
+{"type":"case","query":"颈椎","expect":["m041","m124"],"tags":["two_char"]}
+{"type":"case","query":"柴犬","expect":["m037"],"tags":["two_char"]}
+{"type":"case","query":"审批","expect":["m130"],"tags":["two_char"]}
+{"type":"case","query":"周报","expect":["m105","m168"],"tags":["two_char"]}
+{"type":"case","query":"预算","expect":["m152","m176"],"tags":["two_char"]}
+{"type":"case","query":"路由","expect":["m054"],"tags":["two_char"]}
+{"type":"case","query":"过敏","expect":["m006"],"tags":["two_char"]}

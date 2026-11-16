@@ -1,0 +1,5238 @@
+openapi: 3.1.0
+info:
+  title: personal-agent API
+  version: 0.14.0
+  description: |
+    v0 契约：配对与鉴权、项目、会话与消息、任务与审批、产物与技能。
+    管理面（/admin/*）只走本地套接字，不在本规范内。
+
+    约定：
+    - 分页一律 cursor（updated_at 与 id 复合），不用 offset；
+    - 所有错误响应使用统一的 ApiError；
+    - 字段一旦发布不可改变语义，只能新增。
+
+servers:
+  - url: https://device.local
+    description: |
+      客户端与服务端直连。传输策略由服务端配置决定：
+      - 回环绑定（127.0.0.1）默认明文 HTTP，仅本机可用；
+      - 绑定非回环地址时自动启用自签 TLS，客户端必须按证书指纹固定（TOFU + 人工核对）；
+      - 非回环 + 明文会被服务端拒绝启动，除非显式配置 allow_insecure_plaintext。
+      路径与错误码不因传输方式改变。
+
+tags:
+  - name: pairing
+  - name: auth
+  - name: projects
+  - name: filesystem
+  - name: git
+  - name: conversations
+  - name: messages
+  - name: tasks
+  - name: artifacts
+  - name: media
+  - name: attachments
+  - name: skills
+  - name: themes
+  - name: ssh
+  - name: browser
+  - name: recordings
+  - name: memories
+  - name: models
+
+paths:
+  /api/pair/request:
+    post:
+      tags: [pairing]
+      summary: 提交配对码与设备信息
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PairRequest' }
+      responses:
+        '202':
+          description: 已受理，等待本机或已配对设备确认
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PairPending' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /api/pair/confirm:
+    post:
+      tags: [pairing]
+      summary: 确认或拒绝配对请求
+      description: 由本机管理面或已配对设备发起（信任传递）。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PairConfirmRequest' }
+      responses:
+        '200':
+          description: 配对结果
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PairResult' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/pair/requests/{id}:
+    get:
+      tags: [pairing]
+      summary: 查询配对票据状态
+      description: 客户端提交配对码后轮询此端点；批准后返回服务端公钥与指纹，供人工核对。
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: 票据状态
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PairStatus' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/auth/challenge:
+    post:
+      tags: [auth]
+      summary: 获取一次性挑战
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ChallengeRequest' }
+      responses:
+        '200':
+          description: 挑战与有效期
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ChallengeResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /api/auth/verify:
+    post:
+      tags: [auth]
+      summary: 提交签名换取会话凭据
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/VerifyRequest' }
+      responses:
+        '200':
+          description: 会话凭据
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SessionResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /api/auth/me:
+    get:
+      tags: [auth]
+      summary: 当前设备信息
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 设备信息
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DeviceInfo' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/projects:
+    get:
+      tags: [projects]
+      summary: 项目列表
+      description: |
+        不分页（个人量级，上限 200），统一按 `updated_at DESC, id DESC` 排序。
+        每项带会话数与任务数，客户端列表页不需要再逐条请求。已删除的项目不会出现。
+
+        界面已不再区分 CODE / WORK：`mode` 省略时一次返回全部项目。保留该参数
+        只为旧客户端与调试脚本按能力类型过滤，新客户端不应再传它。
+      parameters:
+        - name: mode
+          in: query
+          required: false
+          description: 按能力类型过滤；省略即返回全部项目
+          schema: { $ref: '#/components/schemas/ProjectMode' }
+      responses:
+        '200':
+          description: 项目列表
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Project' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      tags: [projects]
+      summary: 新建项目
+      description: |
+        目录必须存在于**服务端所在的电脑**上，且落在允许浏览的根目录内。
+        `mode=code` 的目录必须是 git 仓库根（含 `.git`、有提交、非游离 HEAD），
+        并额外受 `code.allow_roots` 约束；`mode=work` 只要求目录存在。
+        同一目录不能同时属于两个活动项目。
+
+        目录还不是可用仓库时**不会**自动初始化：先调 `GET /api/projects/preflight`
+        拿到 `can_init`，用户在确认框里同意后带 `init_git: true` 重试。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProjectCreate' }
+      responses:
+        '201':
+          description: 已创建
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Project' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/projects/preflight:
+    get:
+      tags: [projects]
+      summary: 建项目前的预检
+      description: |
+        只读：不写库、不改磁盘。回答"这个目录能不能建成项目、卡在哪一步、能不能现场修好"。
+
+        `mode=work` 恒为 `ready: true` 且 `git: not_applicable`。
+        `mode=code` 的 `git` 可能是 `missing` / `nested` / `no_commits`（这三种
+        `can_init=true`，可带 `init_git: true` 重试）或 `detached`（需要人工切分支）。
+
+        客户端据此决定要不要弹"是否初始化仓库"的确认框，而不是去解析创建失败的错误文案——
+        `code_project_denied` 同时覆盖越界、无权限、不是仓库、游离 HEAD 四种情况。
+      parameters:
+        - name: mode
+          in: query
+          required: true
+          schema: { $ref: '#/components/schemas/ProjectMode' }
+        - name: path
+          in: query
+          required: true
+          description: 要检查的绝对路径
+          schema: { type: string }
+      responses:
+        '200':
+          description: 预检结果
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProjectPreflight' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/projects/{id}:
+    get:
+      tags: [projects]
+      summary: 项目详情
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      responses:
+        '200':
+          description: 项目
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Project' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [projects]
+      summary: 重命名项目
+      description: 只允许改名字；模式与目录一经创建不可变。
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProjectUpdate' }
+      responses:
+        '200':
+          description: 已更新
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Project' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [projects]
+      summary: 删除项目
+      description: |
+        逻辑删除：写入 `deleted_at`，项目与其下会话、任务一起从接口视图消失，
+        库中的会话、任务、消息与产物全部保留。
+        项目下仍有**未结束**的任务（`queued` / `running` / `needs_input` / `needs_approval`）
+        时返回 409，请先取消。重复删除返回 404；当前不提供恢复接口。
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      responses:
+        '204':
+          description: 已删除（无响应体）
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/fs/dirs:
+    get:
+      tags: [filesystem]
+      summary: 浏览服务端目录
+      description: |
+        供客户端选择项目目录用。只列目录，不列文件；单次最多 200 条，
+        目录优先、名称升序。返回的 `entries[].kind=repo` 表示该目录是 git 仓库根，
+        `mode=code` 时可以直接选它建项目。
+
+        安全边界：请求路径规范化后必须落在允许浏览的根目录内；越界的符号链接
+        不会出现在结果里。`mode=code` 时根目录取自 `code.allow_roots`，
+        未配置会直接报错——编码能力没打开时不该能把仓库目录翻出来。
+      parameters:
+        - name: mode
+          in: query
+          required: true
+          schema: { $ref: '#/components/schemas/ProjectMode' }
+        - name: path
+          in: query
+          description: 要列出的绝对路径；省略时从允许根目录的第一个开始。
+          schema: { type: string }
+      responses:
+        '200':
+          description: 目录内容
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DirListing' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/projects/{id}/files:
+    get:
+      tags: [filesystem]
+      summary: 浏览项目的目录与文件
+      description: |
+        列出项目绑定目录下的某一层内容，供客户端的右侧栏文件树使用。
+        `path` 省略时从项目根开始。只读、无副作用：不递归、不缓存，
+        返回的就是当前磁盘状态。
+
+        安全边界：请求路径规范化后必须落在该项目的根目录内；越界的符号链接
+        不会出现在结果里。默认不返回 `.` 开头的条目，可用 `show_hidden` 打开。
+        单层最多 200 条，超出时截断并置 `truncated`。
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: 项目 id
+          schema: { type: string }
+        - name: path
+          in: query
+          description: 要列出的绝对路径；省略时从项目根目录开始。
+          schema: { type: string }
+        - name: show_hidden
+          in: query
+          description: 是否返回 `.` 开头的文件与目录，默认 false。
+          schema: { type: boolean, default: false }
+      responses:
+        '200':
+          description: 目录内容
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProjectListing' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/projects/{id}/file:
+    get:
+      tags: [filesystem]
+      summary: 读取项目内的文本文件
+      description: |
+        供客户端预览文件内容。最多返回 512 KB；超出时按 UTF-8 字符边界截断并置
+        `truncated=true`。含 NUL 或非法 UTF-8 的文件视为二进制，返回 400 并给出
+        可直接展示的提示，客户端不该拿到半截乱码。
+
+        安全边界与列表端点一致：规范化后必须落在该项目根目录内。
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: 项目 id
+          schema: { type: string }
+        - name: path
+          in: query
+          required: true
+          description: 文件绝对路径。
+          schema: { type: string }
+      responses:
+        '200':
+          description: 文件内容
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FileContent' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/projects/{id}/raw:
+    get:
+      tags: [filesystem]
+      summary: 读取项目内的原始字节（图片 / PDF）
+      description: |
+        供客户端内置查看器使用。与 `/file` 的分工：`/file` 只服务文本预览
+        （512 KB 截断、UTF-8 校验），这里返回**完整字节**，不做截断。
+
+        单文件上限 64 MB；超过时返回 400 并给出可直接展示的提示（引导用户另存到
+        本机用系统应用打开），客户端不该拿到半截文件。`download=true` 跳过该上限，
+        只给「另存为 / 系统分享」用：大文件打不开，但应当存得下来。
+        Content-Type 按扩展名给出，未知类型一律 `application/octet-stream`。
+
+        安全边界与 `/file` 一致：规范化后必须落在该项目根目录内。响应头总是带
+        `cache-control: no-store` 与 `x-content-type-options: nosniff`。
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: 项目 id
+          schema: { type: string }
+        - name: path
+          in: query
+          required: true
+          description: 文件绝对路径。
+          schema: { type: string }
+        - name: download
+          in: query
+          description: 为真时跳过 64 MB 查看器上限（导出路径）。
+          schema: { type: boolean, default: false }
+      responses:
+        '200':
+          description: 文件原始字节
+          content:
+            image/png: { schema: { type: string, format: binary } }
+            image/jpeg: { schema: { type: string, format: binary } }
+            image/gif: { schema: { type: string, format: binary } }
+            image/webp: { schema: { type: string, format: binary } }
+            image/bmp: { schema: { type: string, format: binary } }
+            application/pdf: { schema: { type: string, format: binary } }
+            application/octet-stream: { schema: { type: string, format: binary } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/projects/{id}/git/status:
+    get:
+      tags: [git]
+      summary: 仓库状态（分支、三组变更、进行中的操作）
+      description: |
+        供客户端右侧栏 Git 面板使用。一次命令拿全：当前分支、HEAD、已暂存 / 未暂存 /
+        未跟踪三组文件、以及仓库是否正处于 merge / rebase / cherry-pick / revert 中间态。
+
+        项目目录不是仓库（或属于别的仓库但不是仓库根）时**仍然返回 200**，
+        `repo=false` 并带 `reason`：这是面板要画的空态，不是错误。
+        其余端点（diff / stage / commit 等）遇到同样情况返回 400 `code_project_denied`。
+
+        git 命令在**服务端**执行，客户端拿不到也不需要本地 git。
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: 项目 id
+          schema: { type: string }
+      responses:
+        '200':
+          description: 仓库状态
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GitStatusReport' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '502': { $ref: '#/components/responses/BadGateway' }
+
+  /api/projects/{id}/git/diff:
+    get:
+      tags: [git]
+      summary: 单文件或某次提交的 diff
+      description: |
+        三个来源互斥：
+        - `commit` 有值：看该提交（`git show`），`path` 可省略（省略即整次提交）；
+        - `staged=true`：暂存区相对 HEAD；
+        - 都不给：工作区相对暂存区。
+
+        统一格式（`--no-color`），最多 512 KiB，超出时截断并置 `truncated=true`。
+        二进制文件返回 `binary=true` 且 `text` 为空（由 `--numstat` 的 `-` 判定，不读正文）。
+        未跟踪文件没有索引可 diff，服务端按"整份内容都是新增行"现拼一份，
+        所以"看新文件改了什么"也有输出。
+
+        安全边界：`path` 必须是仓库内相对路径，绝对路径、`..`、`.git` 内部一律拒绝；
+        `commit` 只接受十六进制 sha，不接受任意 revspec。
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: 项目 id
+          schema: { type: string }
+        - name: path
+          in: query
+          description: 仓库内相对路径；`commit` 省略时必填。
+          schema: { type: string }
+        - name: staged
+          in: query
+          description: 为真时看暂存区（`--cached`）。
+          schema: { type: boolean, default: false }
+        - name: commit
+          in: query
+          description: 提交 sha（4-40 位十六进制，支持短 sha）。
+          schema: { type: string }
+      responses:
+        '200':
+          description: diff
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GitDiffReport' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '502': { $ref: '#/components/responses/BadGateway' }
+
+  /api/projects/{id}/git/stage:
+    post:
+      tags: [git]
+      summary: 暂存文件
+      description: |
+        `git add -- <paths>`。路径一律排在 `--` 之后，绝不会被当成选项。
+        一次最多 200 条。成功直接返回最新状态，省掉一次往返。写审计。
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: 项目 id
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/GitPathsRequest' }
+      responses:
+        '200':
+          description: 暂存后的状态
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GitStatusReport' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '502': { $ref: '#/components/responses/BadGateway' }
+
+  /api/projects/{id}/git/unstage:
+    post:
+      tags: [git]
+      summary: 取消暂存
+      description: |
+        `git reset -q HEAD -- <paths>`。空仓库（还没有 HEAD）时改用
+        `git rm --cached`：文件留在磁盘上，只是从索引里摘掉。写审计。
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: 项目 id
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/GitPathsRequest' }
+      responses:
+        '200':
+          description: 取消暂存后的状态
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GitStatusReport' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '502': { $ref: '#/components/responses/BadGateway' }
+
+  /api/projects/{id}/git/discard:
+    post:
+      tags: [git]
+      summary: 撤销已跟踪文件的改动（不可恢复）
+      description: |
+        `git checkout HEAD -- <paths>`：索引与工作区**一起**回到 HEAD，
+        该文件已暂存与未暂存的改动都会消失。客户端必须先二次确认。
+
+        只处理 HEAD 里存在的文件。未跟踪文件与已暂存的新文件不在 HEAD 里，
+        撤销它们等于删除磁盘文件，本端点**不做**：请求里全是这类路径时返回 409 并说明。
+        写审计。
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: 项目 id
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/GitPathsRequest' }
+      responses:
+        '200':
+          description: 撤销后的状态
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GitStatusReport' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '502': { $ref: '#/components/responses/BadGateway' }
+
+  /api/projects/{id}/git/commit:
+    post:
+      tags: [git]
+      summary: 提交已暂存的内容
+      description: |
+        `git commit -m <message>`，hooks 照常执行。只提交暂存区里已有的内容：
+        暂存区为空返回 409（不替用户 `add -A`，那会把没打算提交的东西一起带上）。
+
+        拒绝的三种情况：提交信息为空、仓库处于 merge / rebase / cherry-pick / revert
+        中间态（提示去终端完成）、没有已暂存的内容。
+
+        提交身份取服务端的 git 配置；完全没配时退回 `personal-agent <agent@local>`
+        并记一条 warn，不让"你是谁没配"这种一次性配置问题挡住面板。
+        写审计（含新提交 sha）。
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: 项目 id
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/GitCommitRequest' }
+      responses:
+        '200':
+          description: 新提交与提交后的状态
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GitCommitResult' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '502': { $ref: '#/components/responses/BadGateway' }
+
+  /api/projects/{id}/git/commits:
+    get:
+      tags: [git]
+      summary: 提交历史（新到旧）
+      description: |
+        `git log`，默认 50 条、上限 200。`has_more` 表示还有更早的提交，
+        客户端据此显示「加载更多」，服务端不再单独提供总数。
+        空仓库返回空数组而不是错误。
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: 项目 id
+          schema: { type: string }
+        - name: limit
+          in: query
+          description: 条数，1..200，默认 50。
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+        - name: skip
+          in: query
+          description: 跳过多少条（分页用）。
+          schema: { type: integer, minimum: 0, default: 0 }
+      responses:
+        '200':
+          description: 提交历史
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GitCommitsPage' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '502': { $ref: '#/components/responses/BadGateway' }
+
+  /api/conversations:
+    get:
+      tags: [conversations]
+      summary: 会话列表
+      parameters:
+        - name: project_id
+          in: query
+          description: 只看某个项目下的会话；省略时返回全部（已删除项目的会话不出现）。
+          schema: { type: string }
+        - name: unassigned
+          in: query
+          description: |
+            为真时只看**无归属直聊**（不挂项目的会话），此时忽略 `project_id`。
+            侧栏的「对话」分组靠它取数；不能用空 `project_id` 代替——空值语义是"不筛选"。
+          schema: { type: boolean, default: false }
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: 会话分页
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConversationPage' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      tags: [conversations]
+      summary: 新建会话
+      description: |
+        不指定 `title` 时是**幂等**的：该项目已有标题仍为「新会话」的空白会话
+        （未归档、未删除）就直接复用它，返回 `200` 与那条会话，不新建——侧栏连点
+        「新建会话」不会堆出一串同名会话。复用时顺带刷新 `updated_at`，让它回到
+        列表顶部。
+
+        不传 `project_id` 时建的是**无归属直聊**：会话不挂项目，同样走空白会话
+        复用（按"无归属 + 占位标题 + 模式"匹配）。宽屏中栏的空态页就是这条路径——
+        没有项目、也没选项目时都能直接开口说话。
+
+        显式指定 `title` 时总是新建，返回 `201`。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ConversationCreate' }
+      responses:
+        '200':
+          description: 复用了项目里已有的空白会话（未新建）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Conversation' }
+        '201':
+          description: 已创建
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Conversation' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/conversations/{id}:
+    get:
+      tags: [conversations]
+      summary: 会话详情
+      parameters:
+        - $ref: '#/components/parameters/ConversationId'
+      responses:
+        '200':
+          description: 会话详情（含最近消息）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConversationDetail' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [conversations]
+      summary: 重命名会话
+      description: |
+        只允许改标题；归属项目与模式一经创建不可变。
+        标题按 trim 后保存，空标题或超过字数上限返回 400（不做静默截断）。
+        **不更新 `updated_at`**：它是会话列表的游标排序键，改名不该把会话顶到列表最前。
+      parameters:
+        - $ref: '#/components/parameters/ConversationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ConversationUpdate' }
+      responses:
+        '200':
+          description: 已更新
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Conversation' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [conversations]
+      summary: 删除会话
+      description: |
+        逻辑删除：写入 `deleted_at`，会话在接口视图中不再出现，库中的会话与消息保留。
+        会话名下的任务会**级联软删**（同样只写 `deleted_at` 并释放幂等键）；
+        只有**未结束**的任务（`queued` / `running` / `needs_input` / `needs_approval`）会返回 409，
+        需先取消或等其结束。
+        重复删除返回 404；当前不提供恢复接口。
+      parameters:
+        - $ref: '#/components/parameters/ConversationId'
+      responses:
+        '204':
+          description: 已删除（无响应体）
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/conversations/{id}/compaction:
+    post:
+      tags: [conversations]
+      summary: 重新整理会话上下文
+      description: |
+        把「更早的那部分对话」交给模型归纳成一段摘要，供后续提问装配上下文用。
+        **原文一条不删**：压缩只改变送进模型的内容，历史回看仍是完整消息流。
+
+        忽略自动触发阈值——即使还没到上线也会立即重算（连同已有摘要与新增消息）。
+        异步受理：返回 202 与当前状态，摘要就绪后从
+        `GET /api/conversations/{id}` 的 `compaction` 读取。
+
+        没配置模型时返回 503；这个会话正在整理时返回 409，不排队重复跑。
+        调用它会清掉「用户关闭压缩」的会话级标记。
+      parameters:
+        - $ref: '#/components/parameters/ConversationId'
+      responses:
+        '202':
+          description: 已受理
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Compaction' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+    delete:
+      tags: [conversations]
+      summary: 关闭这个会话的上下文压缩
+      description: |
+        关掉之后装配回到「最近 N 条 + 省略提示」的老行为；已有摘要保留但不参与装配，
+        再次 `POST /api/conversations/{id}/compaction` 会重新开启。
+
+        这是会话级偏好（落在 `conversations.compaction_disabled`），不影响其它会话。
+        **客户端不提供这个入口**：关闭后详情接口不再下发压缩状态，界面上连摘要弹窗
+        都会跟着消失，要重新开启同样只能先调 `POST`。它面向的是接口使用者与脚本。
+      parameters:
+        - $ref: '#/components/parameters/ConversationId'
+      responses:
+        '204':
+          description: 已关闭（无响应体；本来就是关闭状态时同样返回它）
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/conversations/{id}/messages:
+    get:
+      tags: [messages]
+      summary: 历史消息
+      parameters:
+        - $ref: '#/components/parameters/ConversationId'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: 消息分页
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MessagePage' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      tags: [messages]
+      summary: 发送用户消息
+      description: |
+        响应为流式（chunked 或 SSE），事件模型见「项目需求 › 统一事件模型」。
+
+        用户消息以「记住…」开头时，服务端会同步写入长期记忆，并落一条
+        `role=system` 的提示消息（「已记住：…」或「没有保存：…」），
+        同时在 `message_completed` 上带 `notice` 字段，供本次会话立即显示；
+        `system` 消息不进入后续对话上下文。
+      parameters:
+        - $ref: '#/components/parameters/ConversationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SendMessageRequest' }
+      responses:
+        '200':
+          description: 流式响应
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/conversations/{id}/stop:
+    post:
+      tags: [messages]
+      summary: 停止本轮生成
+      description: |
+        让服务端停下这一轮回答，并把**已生成的部分落库**、终态记成 `stopped`；
+        SSE 流随后以 `message_completed`（`finish_reason=stopped`）收尾。
+        一个 token 都没生成就停止时不写历史，流直接结束。
+
+        与"客户端直接断开连接"不同：断开会被服务端当成"没人要了"而丢弃半截回答，
+        所以停止必须显式调这个接口，而不是取消流。
+
+        幂等：这一轮已经结束（或 `client_msg_id` 从未登记）时同样返回 204。
+      parameters:
+        - $ref: '#/components/parameters/ConversationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/StopRequest' }
+      responses:
+        '204':
+          description: 已受理（无响应体；未命中进行中的轮次也返回它）
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/conversations/{id}/file-writes/{request_id}:
+    post:
+      tags: [messages]
+      summary: 决定是否覆盖已有文件
+      description: |
+        模型生成的文件与磁盘上的同名文件冲突时，服务端先把待写内容落库并返回一张
+        `pending` 卡片；用户确认后才真正写盘，本端点就是那一步决定。
+
+        批准时先把原文件复制到数据目录（`file-backups/...`）再覆盖，返回的
+        `backup_path` 可直接用于还原；拒绝不触碰磁盘。
+
+        **不做挂起**：决策可以隔几分钟再发，也可以在服务重启后补发——
+        待写内容在落库时已经确定，不需要模型重新生成。
+
+        过期（超过 `approval_ttl_ms`）已被处理的请求返回 409；
+        请求不属于该会话同样返回 409。
+      parameters:
+        - $ref: '#/components/parameters/ConversationId'
+        - name: request_id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [approve]
+              properties:
+                approve:
+                  type: boolean
+                  description: true 覆盖，false 取消
+      responses:
+        '200':
+          description: 决策后的卡片
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FileWrite' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/conversations/{id}/file-preview:
+    get:
+      tags: [messages]
+      summary: 把会话里生成的文件换成可加载地址
+      description: |
+        会话绑了项目就按项目根解析，没绑就按会话草稿目录（`drafts/{conversation_id}/`）。
+        两种落点的准入与入口白名单完全一致，都只放行 html/htm——客户端只需要说
+        "打开这个文件"，不必知道它属于哪种归属。
+
+        返回的 `url` 带预览站的随机端口与访问令牌，只用于客户端加载。
+      parameters:
+        - $ref: '#/components/parameters/ConversationId'
+        - name: path
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: 可加载地址
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PreviewTarget' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+
+  /api/tasks:
+    get:
+      tags: [tasks]
+      summary: 任务列表
+      parameters:
+        - name: state
+          in: query
+          schema: { $ref: '#/components/schemas/TaskState' }
+        - name: project_id
+          in: query
+          description: 只看某个项目下的任务；归属经会话派生，不接受客户端直接指定。
+          schema: { type: string }
+        - name: conversation_id
+          in: query
+          description: 只看某个会话下的任务；建议卡据此判断"这次建议是否已经派出去"。
+          schema: { type: string }
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: 任务分页
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TaskPage' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      tags: [tasks]
+      summary: 显式创建任务（L3 执行）
+      description: |
+        只有用户明确要"办"时才创建任务；L1 信息与 L2 建议走对话链路，不建任务。
+        携带 `idempotency_key` 时重复提交返回同一任务（200），不重复执行。
+
+        归属：任务的能力边界由会话所属项目决定。**无归属会话**（`project_id` 为空）
+        可以派非编码任务，但读不到任何项目文件；编码任务要求会话挂在项目上，
+        否则返回 400，文案指向"在项目里新建会话后再派"。
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TaskCreateRequest' }
+      responses:
+        '201':
+          description: 新建任务
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Task' }
+        '200':
+          description: 幂等键命中已有任务
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Task' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/tasks/prepare:
+    post:
+      tags: [tasks]
+      summary: 把一句原话解析成任务参数
+      description: |
+        只服务会话里的 `@技能` 入口：用户说的是人话，任务要的是结构化 `input`。
+
+        行为：
+        - 有模型时用一次非流式调用解析，输出必须是 JSON 对象；
+        - 没有模型、超时（8 秒）或输出不可解析时**只把原话放进 `text`**，不猜任何字段
+          （`source=fallback`）。不抽 URL、不认城市：正则抓错值比不抓更糟，
+          错值会被技能当真用。
+
+        `missing` 与 `source` 解耦：它列出技能声明的 `fetch.from` 里这次没拿到的字段，
+        模型解析成功但漏了字段同样会列出来，客户端据此提示「可能读不到资料」。
+
+        技能必须是当前可用（`status != unsupported`）且非编码任务类
+        （`required_tools` 不含 `code.exec`），否则返回 `skill_unknown`。
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PrepareTaskRequest' }
+      responses:
+        '200':
+          description: 解析结果（参数可能不完整，见 `missing`）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PreparedTaskInput' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/tasks/{id}:
+    get:
+      tags: [tasks]
+      summary: 任务详情
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+      responses:
+        '200':
+          description: 任务详情（含计划、步骤与产物）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Task' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [tasks]
+      summary: 删除任务记录
+      description: |
+        逻辑删除：写入 `deleted_at`，任务在接口视图中不再出现；库中的任务、步骤、
+        审批与产物元信息全部保留，磁盘上的产物文件与编码任务工作树也不删。
+        仍在排队 / 执行 / 待补充 / 待审批的任务返回 409，请先取消。
+        删除会释放任务的幂等键；重复删除返回 404；当前不提供恢复接口。
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+      responses:
+        '204':
+          description: 已删除（无响应体）
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/tasks/{id}/cancel:
+    post:
+      tags: [tasks]
+      summary: 取消任务
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+      responses:
+        '200':
+          description: 已受理
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Task' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/tasks/{id}/approve:
+    post:
+      tags: [tasks]
+      summary: 批准或拒绝待确认动作
+      description: >
+        scope=task（如 merge_changes）批准后继续合并、拒绝则取消任务；
+        scope=tool（code.tool_use）批准后只放行这一次调用、拒绝只驳回这一步，
+        任务继续运行（CLI 会看到工具失败并自行调整）。
+        工具级放行时若带 remember=true，worker 会在本任务内记住本次命中的规则，
+        之后同类调用不再建卡；凭证、提权、越界写不可记住。
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ApproveRequest' }
+      responses:
+        '202':
+          description: 已受理，执行结果另行推送
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Task' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/tasks/{id}/retry:
+    post:
+      tags: [tasks]
+      summary: 重试任务
+      description: 幂等；写操作必须带原 idempotency_key，避免重复下单。
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+      responses:
+        '202':
+          description: 已受理
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Task' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/tasks/{id}/worktree:
+    delete:
+      tags: [tasks]
+      summary: 清理编码任务的现场
+      description: |
+        删除该任务在**服务端数据目录**里的隔离工作树（`{worktree_dir}/{task_id}`）。
+
+        - 只删数据目录里的这棵克隆，**不碰原仓库**：已合并回仓库的 `agent/{task_id}` 分支
+          属于用户仓库历史，要删请自行 `git branch -D`。
+        - 任务还没结束 → 409；worker 仍在收尾（心跳里还报着这个任务）→ 409，稍后重试。
+        - 目录本来就不存在 → 204（幂等，客户端可以放心重试）。
+        - 任务不存在 → 404。
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+      responses:
+        '204':
+          description: 已清理（无响应体）；目录原本不存在时同样返回 204
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/artifacts/{id}:
+    get:
+      tags: [artifacts]
+      summary: 产物元信息
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: 产物元信息；正文按 `/api/artifacts/{id}/content` 下载
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Artifact' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/artifacts/{id}/content:
+    get:
+      tags: [artifacts]
+      summary: 产物内容
+      description: |
+        返回产物正文原始字节。响应带 `content-type`（取自产物 mime）与
+        `content-disposition`（附件，文件名由 kind 生成）。文件缺失时返回 404
+        统一错误体，客户端应提示「产物已被清理」而不是空白页。
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: 产物正文
+          headers:
+            content-disposition:
+              schema: { type: string }
+            x-content-type-options:
+              schema: { type: string }
+          content:
+            text/plain:
+              schema: { type: string, format: binary }
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/media/{id}/content:
+    get:
+      tags: [media]
+      summary: 会话媒体内容（图片 / 视频）
+      description: |
+        返回 `generate_image` / `generate_video` 产出文件的原始字节。
+        只按 id 取：文件路径由服务端记录决定，客户端传不进路径。
+        响应带 `content-type`（取自记录里的 mime）与长期缓存头
+        （同一 id 的字节不可变）；`?download=true` 时额外带附件头。
+        记录或文件缺失时返回 404 统一错误体，客户端应提示「媒体已被清理」。
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: download
+          in: query
+          required: false
+          schema: { type: boolean, default: false }
+      responses:
+        '200':
+          description: 媒体正文
+          headers:
+            cache-control:
+              schema: { type: string }
+            x-content-type-options:
+              schema: { type: string }
+          content:
+            image/png:
+              schema: { type: string, format: binary }
+            image/jpeg:
+              schema: { type: string, format: binary }
+            video/mp4:
+              schema: { type: string, format: binary }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/conversations/{id}/draft-file:
+    get:
+      tags: [conversations]
+      summary: 读取会话草稿里的生成文件
+      description: |
+        返回草案目录里一个文件的原始字节，只服务「另存为 / 系统分享」。
+
+        与 `file-preview` 的分工：那个换的是能在 WebView 里加载的地址（白名单只认
+        html/htm），这个给的是字节，不扩大预览站的暴露面。`?download=true` 时跳过
+        查看器上限并带附件头。草案不在项目目录里，因此项目端点取不到这些文件。
+
+        路径只接受草案根内相对路径：`..`、软链接与越界由同一套 canonical 边界拦下，
+        返回 `invalid_request`；目录或文件不存在返回 404。
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: path
+          in: query
+          required: true
+          description: 草案根内相对路径（URL 编码）
+          schema: { type: string }
+        - name: download
+          in: query
+          required: false
+          schema: { type: boolean, default: false }
+      responses:
+        '200':
+          description: 文件字节
+          headers:
+            cache-control:
+              schema: { type: string }
+            x-content-type-options:
+              schema: { type: string }
+            content-disposition:
+              schema: { type: string }
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/media/{id}/poster:
+    get:
+      tags: [media]
+      summary: 视频封面（生成时抽取的第一帧）
+      description: |
+        生成视频成功后由服务端用 ffmpeg 抽第一帧、以 jpeg 存进产物库，这里按 id 取回。
+
+        没有封面时返回 404：旧视频（该能力上线前生成的）与"服务端未安装 ffmpeg"
+        都会落到这里，客户端应回退到播放图标占位块，而不是报错。响应带长期缓存头
+        （同一 id 的封面不会变）。
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: 封面图片
+          headers:
+            cache-control:
+              schema: { type: string }
+            x-content-type-options:
+              schema: { type: string }
+          content:
+            image/jpeg:
+              schema: { type: string, format: binary }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/media/{id}/save:
+    post:
+      tags: [media]
+      summary: 把会话产物另存进所属项目
+      description: |
+        把一枚会话产物（图片 / 视频）复制到它所属项目的 `artifacts/` 目录。
+
+        **不传路径也不传 projectId**：落点固定为 `<项目>/artifacts/`，归属由服务端
+        从 `media_assets → conversations.project_id` 反查——会话页只有标题与目录，
+        没有项目 id，也不该能指定任意项目。
+
+        `name` 是用户确认过的文件名（不含目录）。为空、以点开头、含
+        `/ \ : * ? " < > |` 或控制字符、超长都返回 `invalid_request`；
+        没有扩展名时按记录里的 mime 补上。目标已存在返回 `conflict`，
+        **不覆盖**已有文件。产物没有归属项目时返回 `invalid_request`
+        （提示只能保存到本机）。
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  description: 文件名（含扩展名，不含目录）
+      responses:
+        '201':
+          description: 已写入项目
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [path, bytes]
+                properties:
+                  path:
+                    type: string
+                    description: 项目内相对路径，例如 `artifacts/a.png`
+                  bytes:
+                    type: integer
+                    description: 落盘字节数
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/attachments:
+    post:
+      tags: [attachments]
+      summary: 上传一枚输入框附件
+      description: |
+        请求体是文件原始字节，`content-type` 即该文件的 mime（缺省按
+        `application/octet-stream` 处理）。刻意不做 multipart / base64：
+        客户端手里本来就是字节，多一层编码只会让请求体大 33%。
+
+        **上传与会话解耦**：此时还没有 `conversation_id`，空态页也能先传。
+        发送消息时把返回的 `id` 放进 `SendMessageRequest.attachments` 完成绑定。
+
+        超过 `attachment.max_bytes` 返回 `payload_too_large`；同一条消息超过
+        `attachment.max_count` 枚在发送时返回 `invalid_request`。
+      parameters:
+        - name: name
+          in: query
+          required: false
+          description: 原始文件名（URL 编码）。只用于展示与下载时的存盘名；路径分隔符会被剥掉。
+          schema: { type: string }
+        - name: w
+          in: query
+          required: false
+          description: 图片像素宽。客户端解码缩略图时已知，服务端不再解析一遍。
+          schema: { type: integer }
+        - name: h
+          in: query
+          required: false
+          description: 图片像素高。
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema: { type: string, format: binary }
+      responses:
+        '201':
+          description: 已登记
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Attachment' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+
+  /api/attachments/{id}/content:
+    get:
+      tags: [attachments]
+      summary: 附件内容
+      description: |
+        返回附件原始字节。只按 id 取：文件路径由服务端在上传时生成并写库，
+        客户端既拿不到也传不进路径。响应带 `content-type`（记录里的 mime）
+        与长期缓存头（同一 id 的字节不可变）；`?download=true` 时额外带附件头，
+        文件名取上传时登记的名字。记录或文件缺失时返回 404 统一错误体。
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: download
+          in: query
+          required: false
+          schema: { type: boolean, default: false }
+      responses:
+        '200':
+          description: 附件正文
+          headers:
+            cache-control:
+              schema: { type: string }
+            x-content-type-options:
+              schema: { type: string }
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/attachments/{id}:
+    delete:
+      tags: [attachments]
+      summary: 删除未发送的附件
+      description: |
+        用户撤掉输入框里的 chip 时清文件。已经绑到消息上的附件拒绝删除
+        （`409`）：那条历史消息里的芯片还要能点开。
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '204': { description: 已删除 }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/skills:
+    get:
+      tags: [skills]
+      summary: 可用技能列表
+      description: |
+        只读。内置技能随二进制发布；外部技能由 `/api/plugins` 安装，装完即出现在这里。
+
+        每条带 `source`（builtin / third_party）、`status`（supported / degraded /
+        unsupported）与 `plugin_name`。`unsupported` 的技能依赖本机没有的工具，
+        装了也跑不了，所以**不从这里返回**——它只出现在插件管理页并附 `reasons`。
+
+        传 `mode` 时按项目模式过滤：声明了 `code.exec` 能力的技能（编码任务）
+        只在 `mode=code` 下出现，其余技能两种模式都可用。
+        服务端不因客户端传参放宽边界——派任务时会按任务所属会话的项目再校验一次。
+      parameters:
+        - name: mode
+          in: query
+          description: 项目模式；省略时返回全部（含编码任务）。
+          schema: { $ref: '#/components/schemas/ProjectMode' }
+        - name: include_unsupported
+          in: query
+          description: |
+            默认 `false`：列表只含能跑的技能，`status=unsupported` 的已被过滤
+            （它们只出现在插件管理页，那里能看到原因）。
+            设为 `true` 才一并返回，仅供诊断用；会话里的 `@技能` 补全与
+            「新建任务」下拉都不该用它。
+          schema: { type: boolean, default: false }
+      responses:
+        '200':
+          description: 技能列表
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Skill' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/plugins:
+    get:
+      tags: [skills]
+      summary: 已安装的技能包
+      description: |
+        只读元信息与启停状态，附带每个插件提供的技能。
+
+        `pending_reload` 为 true 表示刚安装、启停或卸载过，但执行进程还有任务在跑：
+        改动**要等空闲后生效**。客户端应提示「已安装，当前任务结束后生效」，
+        而不是让用户以为马上能用。
+      responses:
+        '200':
+          description: 插件列表与待生效标记
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PluginPage' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      tags: [skills]
+      summary: 安装技能包
+      description: |
+        请求体是 zip 的**原始字节**（`application/zip`），不用 multipart：
+        客户端沿用录音分段那套二进制上传，少一层边界解析。
+
+        包内至少要有一份 `SKILL.md`。支持四种形态，按序探测、命中即停：
+
+        1. Claude 插件：`.claude-plugin/plugin.json` + `skills/<name>/SKILL.md`
+        2. 本项目原生：`plugin.json` + `skills/<name>/SKILL.md`
+        3. 无清单：`skills/<name>/SKILL.md`（id 取目录名，版本记 0.0.0）
+        4. 单技能：根目录 `SKILL.md`（id 取目录名）
+
+        外层多包一层目录会自动剥掉（Claude 与 Codex 打包时常见）。
+
+        安装是**原子**的：解压到临时目录、全量校验通过后才落到
+        `<数据目录>/plugins/<id>/<version>/`，任一步失败清理干净，不留半截目录。
+
+        限额：包体 ≤ 8 MiB、文件数 ≤ 256、单文件解压后 ≤ 2 MiB、总解压 ≤ 32 MiB。
+      requestBody:
+        required: true
+        content:
+          application/zip:
+            schema: { type: string, format: binary }
+      responses:
+        '201':
+          description: 已安装（可能带 `pending_reload`）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PluginPage' }
+        '400':
+          description: 包不合法（`plugin_invalid`）：结构不可识别、清单非法、压缩包损坏或超限
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409':
+          description: 插件 id 或技能名重复（`plugin_conflict`）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
+        '413':
+          description: 请求体超过安装包上限（`payload_too_large`）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
+
+  /api/plugins/{id}:
+    patch:
+      tags: [skills]
+      summary: 启用或停用插件
+      description: |
+        停用后该插件的技能立即从 `/api/skills`、新建任务下拉与对话建议里消失；
+        正在跑的任务不受影响。改动同样受 `pending_reload` 约束。
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PluginStateUpdate' }
+      responses:
+        '200':
+          description: 更新后的状态
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PluginPage' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [skills]
+      summary: 卸载插件
+      description: |
+        删除插件目录与配置记录，其技能立即从候选里消失。正在跑的任务不受影响。
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '204':
+          description: 已卸载
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/themes:
+    get:
+      tags: [themes]
+      summary: 主题包列表
+      description: |
+        返回全部已安装的主题包（**含客户端渲染所需的完整色表覆盖**，稀疏字段即
+        "该格沿用内置派生值"）。主题包数量是"几十"，一次全量返回，不分页。
+
+        客户端选中某个包后本地记住 id，并缓存整份 spec：服务端不可达时用缓存着色，
+        列表里消失的包先继续用缓存并标记「已失效」，缓存也丢了才回落到内置主题。
+
+        与技能包不同，主题包**没有启停**：主题是二选一，启停没有语义。
+        也没有 `pending_reload`：换肤完全在客户端完成，不经过执行进程。
+      responses:
+        '200':
+          description: 主题包列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ThemePage' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      tags: [themes]
+      summary: 安装主题包
+      description: |
+        请求体是 zip 的**原始字节**（`application/zip`），与技能包同一套二进制上传。
+
+        包内必须有一份 `theme.json`（可以多包一层目录，会自动剥掉）：
+        `theme_api`、`id`、`name`、`version`、`brightness` 必填，颜色全部可缺省。
+        颜色写 `#RRGGBB` 或 `#AARRGGBB`。
+
+        安装是**原子**的：解压到 `<数据目录>/themes/.tmp/<token>/`、全量校验通过后
+        才落到 `<数据目录>/themes/<id>/`，任一步失败清理干净。
+
+        同 id 重装即覆盖（主题不需要版本目录）。限额：包体 ≤ 2 MiB、文件数 ≤ 64、
+        单文件解压后 ≤ 512 KiB、总解压 ≤ 4 MiB。
+      requestBody:
+        required: true
+        content:
+          application/zip:
+            schema: { type: string, format: binary }
+      responses:
+        '201':
+          description: 已安装，返回最新列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ThemePage' }
+        '400':
+          description: 包不合法（`theme_invalid`）：缺 theme.json、字段非法、压缩包损坏或超限
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '413':
+          description: 请求体超过主题包上限（`payload_too_large`）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
+
+  /api/themes/{id}:
+    delete:
+      tags: [themes]
+      summary: 删除主题包
+      description: |
+        删除安装目录与记录。正在使用该主题的客户端由自己决定回落策略
+        （用本地缓存着色到下次启动，或立即回落到内置浅色/深色）。
+
+        先删文件再删记录：反过来的话，删文件失败会留下一条指向空目录的记录。
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: 已删除，返回最新列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ThemePage' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/code/providers:
+    get:
+      tags: [code]
+      summary: 编码 CLI 的能力清单
+      description: |
+        只读。`capabilities` 来自 `protocol` 的技能能力注册表，与 worker 的实现同源，
+        客户端不需要按 provider 名字写死按钮文案。
+        `available` 是"现在真的能跑"（未被显式禁用且可执行文件存在），客户端用它填
+        "执行方式"下拉；`enabled` 只表示"没有在配置里被 `code.providers.<id>.enabled: false`
+        关掉"（未登记按启用处理）。两者不一致说明的是装没装，而不是"没启用"。
+      responses:
+        '200':
+          description: provider 清单与默认路由
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CodeProviders' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/models:
+    get:
+      tags: [models]
+      summary: 模型配置列表
+      description: |
+        返回全部模型配置（默认档永远在第一位）与当前生效项。读的是服务端内存快照，
+        不读磁盘也不解析密钥，可以随页面刷新频繁调用。
+
+        **不含密钥**：每条只有 `api_key_source`（`secrets` / `env` / `none`）与
+        `api_key_hint`（末四位）。完整密钥永远不会出现在任何响应里。
+      responses:
+        '200':
+          description: 配置列表与生效项
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ModelList' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+    post:
+      tags: [models]
+      summary: 新建模型配置
+      description: |
+        新建一份命名配置。默认档（id=`default`）来自配置文件主节，不在这里新建；
+        它已经存在，可直接用 PATCH 编辑。
+
+        `api_key` 写入 `{data_dir}/model-secrets.json`（Unix 权限 0600），
+        `config.json` 里只留地址与模型名。落盘失败时整体失败、内存不变。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ModelCreateRequest' }
+      responses:
+        '201':
+          description: 新建成功
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ModelWriteResult' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/models/test:
+    post:
+      tags: [models]
+      summary: 测试连通性
+      description: |
+        用表单里尚未保存的值（或已保存配置 + 现填的覆盖项）发一次 `max_tokens: 8`
+        的真实请求，返回结论而不是抛错。
+
+        **永远 200**：连通性失败是结论不是请求错误。客户端据 `ok` 与 `error_code`
+        就地区分"密钥错了"（`auth_failed`）与"地址或路径错了"（`endpoint_not_found`
+        / `unreachable`），以及"这个模型名上游不认识"（`model_not_found`）。
+
+        带 `id` 且 `api_key` 为空时复用已保存的密钥，因此"编辑页点测试"不需要用户
+        重新粘贴 Key。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ModelTestRequest' }
+      responses:
+        '200':
+          description: 探测结果（成功与失败都走 200）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ModelTestResult' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/models/{id}:
+    patch:
+      tags: [models]
+      summary: 修改模型配置
+      description: |
+        局部更新。`api_key` 缺省或空串表示**不改动**已有密钥（编辑页不回显密钥，
+        留空是最常见的保存动作）；确需清除时传 `clear_api_key: true`。
+
+        `id=default` 时改的是配置文件主节（默认档），改完仍是默认档。
+      parameters:
+        - $ref: '#/components/parameters/ModelId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ModelUpdateRequest' }
+      responses:
+        '200':
+          description: 修改后的配置
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ModelWriteResult' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+    delete:
+      tags: [models]
+      summary: 删除模型配置
+      description: |
+        删除一份命名配置并清理它的密钥。默认档不能删除（400）。
+
+        删的是当前生效项时自动回落到默认档，响应里的 `active_id` 就是回落后的值——
+        服务端不允许出现"生效项指向一条不存在的记录"。
+      parameters:
+        - $ref: '#/components/parameters/ModelId'
+      responses:
+        '200':
+          description: 已删除
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [deleted, active_id, persisted]
+                properties:
+                  deleted: { type: string }
+                  active_id: { type: string }
+                  persisted: { type: boolean, description: false 表示没有来源配置文件，重启后会丢 }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/models/{id}/activate:
+    post:
+      tags: [models]
+      summary: 设为当前生效模型
+      description: |
+        切一份配置并**立即生效**：对话、任务步骤、会话标题、记忆抽取、录音摘要
+        下一轮起全部使用新模型，不需要重启服务。
+
+        正在生成的那一轮持有旧模型的快照，会正常跑完，不会被中途切换打断。
+
+        返回值包含 `available` 与 `reason`：配置写错（地址空、缺密钥）不会让切换失败，
+        而是明确告诉客户端"切过去了但用不了，回答会退回确定性实现"。
+      parameters:
+        - $ref: '#/components/parameters/ModelId'
+      responses:
+        '200':
+          description: 切换结果
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ModelActivateResult' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/ssh:
+    get:
+      tags: [ssh]
+      summary: SSH 隧道（WebSocket 升级）
+      description: |
+        升级为 WebSocket 后，把二进制帧与 `ssh.target`（默认 `127.0.0.1:22`）的
+        TCP 流双向透传。SSH 握手、密码认证与主机密钥校验全部由客户端完成；
+        服务端不解析协议内容，也不记录终端输出。
+
+        约束：
+        - 必须携带 `Authorization: Bearer <token>`，未配对设备直接 401；
+        - 只接受二进制帧，收到文本帧即断开（不复用请求帧承载控制消息）；
+        - 终点由服务端配置决定且必须是回环地址，客户端无法指定目标主机；
+        - 并发会话数受 `ssh.max_sessions` 限制，超出返回 `rate_limited`；
+        - 终点不可达或隧道被关闭返回 `ssh_unavailable`。
+
+        为什么走隧道而不是直连 22 端口：可达性与 `/api/*` 完全一致（同一套 TLS 与
+        鉴权），手机在外网或防火墙只放行 8787 时也能用，且不必对外暴露 sshd。
+      responses:
+        '101':
+          description: 已切换协议（WebSocket），此后为纯二进制透传
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+
+  /api/ssh/info:
+    get:
+      tags: [ssh]
+      summary: SSH 隧道可用性
+      description: |
+        连接前预检：服务端是否开启隧道、终点地址、终点当前是否可连。
+        客户端据此在用户输入密码前就提示"服务端没开远程登录"，
+        避免把 sshd 不可达误判成密码错误。
+      responses:
+        '200':
+          description: 隧道状态
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SshTunnelInfo' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/browser/info:
+    get:
+      tags: [browser]
+      summary: 浏览器隧道可用性
+      description: |
+        连接前预检：服务端是否开启浏览器隧道、是否只允许回环目标、
+        允许访问的端口白名单、并发上限。客户端据此在输入端口前就能
+        解释"为什么这个端口打不开"，而不是让请求卡在握手上。
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 隧道状态
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BrowserTunnelInfo' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/browser/tunnel:
+    get:
+      tags: [browser]
+      summary: 浏览器隧道（WebSocket 升级）
+      description: |
+        升级为 WebSocket 后，把二进制帧与 `target` 的 TCP 流双向透传。
+        服务端不解析 HTTP，页面不需要任何改写，Cookie / WebSocket / SSE / HMR
+        都按原样工作。客户端在本机起一个回环监听端口，把 WebView 指向它。
+
+        约束：
+        - 必须携带 `Authorization: Bearer <token>`，未配对设备直接 401；
+        - `target` 必须是 `host:port`，主机解析结果全部为回环地址；
+        - 端口必须在 `browser.allowed_ports` 内，且不得是 22、`/api` 自身端口、
+          编码代理端口；
+        - 只接受二进制帧，收到文本帧即断开；
+        - 并发连接数受 `browser.max_tunnels` 与 `browser.max_tunnels_per_device`
+          限制，超出返回 `rate_limited`；
+        - 未启用或目标拒连返回 `browser_unavailable`；目标不在白名单返回
+          `browser_target_denied`。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: target
+          in: query
+          required: true
+          description: 回环目标，形如 `127.0.0.1:3000` 或 `[::1]:8080`。
+          schema: { type: string }
+      responses:
+        '101':
+          description: 已切换协议（WebSocket），此后为纯二进制透传
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+
+  /api/recordings:
+    get:
+      tags: [recordings]
+      summary: 录音列表
+      description: |
+        按 `updated_at DESC, id DESC` 翻页。`q` 匹配标题与转写稿（转写稿为主数据，
+        音频只作归档），`status` 过滤聚合状态。
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - name: q
+          in: query
+          description: 标题或转写稿的模糊匹配；空表示不过滤。
+          schema: { type: string, maxLength: 100 }
+        - name: status
+          in: query
+          description: 按聚合状态过滤。
+          schema:
+            type: string
+            enum: [recording, recorded, transcribing, ready, partial, failed]
+      responses:
+        '200':
+          description: 录音列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RecordingPage' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      tags: [recordings]
+      summary: 新建录音（幂等）
+      description: |
+        客户端在开始录音时调用（实时模式必须在第一段上传前建好）。同一个
+        `client_recording_id` 重复提交返回已有记录（200），不会新建第二条。
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RecordingCreate' }
+      responses:
+        '201':
+          description: 已创建
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Recording' }
+        '200':
+          description: 幂等命中，返回已有记录
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Recording' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/recordings/info:
+    get:
+      tags: [recordings]
+      summary: 转写能力与配额
+      description: |
+        客户端据此显示「仅本地 / 允许上传」。`asr_available=false` 时上传仍会
+        成功（音频落盘归档），只是不会产生转写文本。
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 能力与配额
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RecordingInfo' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/recordings/{id}:
+    get:
+      tags: [recordings]
+      summary: 录音详情（含全部分段）
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: 详情
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RecordingDetail' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [recordings]
+      summary: 重命名
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RecordingUpdate' }
+      responses:
+        '200':
+          description: 更新后的录音
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Recording' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [recordings]
+      summary: 删除录音与归档音频
+      description: 与项目/会话的软删不同：录音连同服务端归档音频一起删除，不可恢复。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '204':
+          description: 已删除
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/recordings/{id}/segments/{seq}:
+    post:
+      tags: [recordings]
+      summary: 上传一个音频分段
+      description: |
+        请求体是完整 WAV 文件（16kHz、单声道、PCM16）。`realtime` 模式下服务端
+        在本次请求内调用 ASR 并回传该段文本；失败只标记 `failed`，音频仍保留，
+        可走 `retry` 重试。`batch` 模式只落盘，`complete` 后统一转写。
+
+        同一 `(id, seq)` 重复上传返回已有分段，不会重复转写。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: seq
+          in: path
+          required: true
+          description: 录音内单调序号，从 0 开始。
+          schema: { type: integer, minimum: 0, maximum: 999999 }
+        - name: start_ms
+          in: query
+          required: true
+          schema: { type: integer, minimum: 0 }
+        - name: end_ms
+          in: query
+          required: true
+          schema: { type: integer, minimum: 1 }
+      requestBody:
+        required: true
+        content:
+          audio/wav:
+            schema: { type: string, format: binary }
+      responses:
+        '201':
+          description: 已落盘（可能同时完成转写）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RecordingSegment' }
+        '200':
+          description: 幂等命中，返回已有分段
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RecordingSegment' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+
+  /api/recordings/{id}/complete:
+    post:
+      tags: [recordings]
+      summary: 结束录音并触发转写
+      description: |
+        `realtime` 模式补齐尚未转写的分段；`batch` 模式开始整体转写。
+        返回详情，客户端轮询它直到 `ready` / `partial` / `failed`。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RecordingComplete' }
+      responses:
+        '200':
+          description: 详情
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RecordingDetail' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+
+  /api/recordings/{id}/retry:
+    post:
+      tags: [recordings]
+      summary: 重试失败的分段
+      description: 把所有 `failed` / `stored` 分段重新排队；已成功的不重传、不重转写。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: 详情（转写已重新排队）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RecordingDetail' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+
+  /api/recordings/{id}/summary:
+    post:
+      tags: [recordings]
+      summary: 重新生成录音总结
+      description: |
+        清空旧总结与旧语音，置为 `pending`，由服务端后台重新生成。
+        只有录音已结束、全部分段转写完成且至少有一段文字时才允许。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                style: { $ref: '#/components/schemas/SummaryStyle' }
+      responses:
+        '200':
+          description: 详情（总结已重新排队）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RecordingDetail' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+    patch:
+      tags: [recordings]
+      summary: 保存总结形式
+      description: |
+        只保存用户选中的下一版总结形式，不触发生成、不清空现有总结与语音。
+        用户随后调用 POST /summary 才按该形式重新生成。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [style]
+              properties:
+                style: { $ref: '#/components/schemas/SummaryStyle' }
+      responses:
+        '200':
+          description: 详情（选择已保存）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RecordingDetail' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+
+  /api/recordings/{id}/summary/audio:
+    get:
+      tags: [recordings]
+      summary: 下载总结语音
+      description: 返回合成好的总结语音；未就绪时返回 `summary_audio_not_ready`。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: 语音文件（mp3 或 wav）
+          content:
+            audio/mpeg:
+              schema: { type: string, format: binary }
+            audio/wav:
+              schema: { type: string, format: binary }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+    post:
+      tags: [recordings]
+      summary: 确保总结语音已排队合成
+      description: |
+        总结已生成但语音还没合成时调用；重复调用幂等。合成完成后用 GET 下载。
+        未开启 TTS 返回 `tts_unavailable`。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: 详情（语音状态已排队）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RecordingDetail' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+
+  /api/recordings/{id}/summary/audio/peaks:
+    get:
+      tags: [recordings]
+      summary: 获取总结语音的波形峰值
+      description: |
+        把已落盘的总结语音解码成固定 480 个 `0..255` 的线性幅度峰值，供客户端
+        画回放波形。结果不落盘也不落库，按需计算（几十到 200ms）；语音版本
+        直接复用 `summary.audio_updated_at`，重新生成后版本变化即失效。
+        解码失败返回 500，客户端应静默降级为进度条，不影响播放。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: 峰值数组
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SummaryAudioPeaks' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/recordings/{id}/audio:
+    get:
+      tags: [recordings]
+      summary: 下载归档音频（整段 WAV）
+      description: 按 `seq` 顺序拼接所有分段，返回一个新的 16kHz 单声道 PCM16 WAV。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: WAV 文件
+          content:
+            audio/wav:
+              schema: { type: string, format: binary }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+
+  /api/memories:
+    get:
+      tags: [memories]
+      summary: 记忆列表
+      description: |
+        `q` 走 FTS5（bigram 预分词）+ LIKE 兜底，按相关度排序，**此时不分页**
+        （`next_cursor` 为空）。无 `q` 时按 `(updated_at DESC, id DESC)` 游标分页。
+        `status` 省略或传 `all` 表示不过滤；单条记忆被软删后立即从这里消失。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: kind
+          in: query
+          schema:
+            type: string
+            enum: [profile, preference, event, project]
+        - name: status
+          in: query
+          description: 省略或 `all` 表示不过滤。
+          schema:
+            type: string
+            enum: [all, candidate, active, stale, archived]
+        - name: scope
+          in: query
+          schema: { type: string, enum: [global, project] }
+        - name: project_id
+          in: query
+          schema: { type: string }
+        - name: entity_id
+          in: query
+          schema: { type: string }
+        - name: batch_id
+          in: query
+          schema: { type: string }
+        - name: q
+          in: query
+          description: 关键词。两字中文查询也能命中（写入侧做过 bigram 预分词）。
+          schema: { type: string }
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: 一页记忆
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MemoryPage' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      tags: [memories]
+      summary: 显式写入一条记忆
+      description: |
+        `evidence_quote` 必填：显式记忆也要留一句原话作为依据，缺了返回 400。
+        命中"同主体 + 同内容"的既有记忆时**合并证据**并返回该条目，不新增行。
+        内容命中密钥/证件号一类的敏感模式会被拒绝写入。
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MemoryCreateRequest' }
+      responses:
+        '201':
+          description: 写入（或合并）后的记忆详情
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MemoryDetail' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '503': { $ref: '#/components/responses/MemoryUnavailable' }
+
+  /api/memories/state:
+    get:
+      tags: [memories]
+      summary: 记忆状态快照
+      description: |
+        首页徽标与设置页共用。`enabled=false` 时返回 200 且 `enabled=false`，
+        不算错误。摘要因置顶超预算生成不出来时，`digest_warning` 给出可执行的提示。
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 状态快照
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MemoryStateView' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/memories/digest:
+    get:
+      tags: [memories]
+      summary: 最近的摘要快照
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 30, default: 7 }
+      responses:
+        '200':
+          description: 快照列表，按时间倒序
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/DigestListItem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/memories/digest/{id}:
+    get:
+      tags: [memories]
+      summary: 一份摘要快照全文
+      description: 一期只读，不支持回滚到某个快照。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: 快照全文
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DigestView' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/memories/{id}:
+    get:
+      tags: [memories]
+      summary: 记忆详情（含证据）
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: 详情
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MemoryDetail' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [memories]
+      summary: 局部更新
+      description: |
+        只传要改的字段。`status` 只允许 `active` / `archived`；
+        删除必须走 `DELETE`（要留软删痕迹）。改正文会把来源标记成 `user_corrected`。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MemoryUpdateRequest' }
+      responses:
+        '200':
+          description: 更新后的详情
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MemoryDetail' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [memories]
+      summary: 遗忘一条记忆（软删）
+      description: 行保留（`status=deleted` + `deleted_at`），读路径立即排除；重复删除返回 204。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '204': { description: 已删除（幂等） }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+
+  /api/memories/candidates/decide:
+    post:
+      tags: [memories]
+      summary: 批量接受或拒绝候选
+      description: |
+        只有 `status=candidate` 的记忆会被处理；其它 id 进 `skipped` 而不是报错，
+        方便客户端在处理中断后整批重放。
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CandidateDecisionRequest' }
+      responses:
+        '200':
+          description: 处理结果
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CandidateDecisionResult' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/memories/batches/{batch_id}/revoke:
+    post:
+      tags: [memories]
+      summary: 撤销一整批记忆
+      description: 整批转 `archived`，不硬删；撤销空批次返回 `conflict`。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: batch_id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BatchRevokeRequest' }
+      responses:
+        '200':
+          description: 撤销条数
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BatchRevokeResult' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/memories/organize:
+    post:
+      tags: [memories]
+      summary: 手动整理一次记忆
+      description: |
+        立即返回，整理在后台执行：实体快照重算、录音/编码任务沉淀、衰减归档、归并。
+        忽略自动整理的「03:00 之后」「距上次 ≥20 小时」两个条件，也不产生提醒消息。
+        只要求 `memory.enabled`，不看 `memory.heartbeat.enabled`。
+        完成状态看 `GET /api/memories/state` 的 `maintenance` 节（`organizing` 转 false 即结束）。
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 已开始整理
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OrganizeAck' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '503': { $ref: '#/components/responses/MemoryUnavailable' }
+
+  /api/memories/forget:
+    post:
+      tags: [memories]
+      summary: 按条件批量遗忘
+      description: |
+        `dry_run=true` 只回条数，不写库；条件全为空返回 400（那等于删掉一切）。
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ForgetRequest' }
+      responses:
+        '200':
+          description: 命中与已遗忘条数
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ForgetResult' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/memories/archived/purge:
+    post:
+      tags: [memories]
+      summary: 清空归档
+      description: |
+        把 `status=archived` 的记忆批量软删（转 `deleted`，行保留、读路径排除），
+        可选按 `kind` 收窄；生效与候选不受影响。幂等：重复调用返回 0 条。
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PurgeArchivedRequest' }
+      responses:
+        '200':
+          description: 清除条数
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PurgeArchivedResult' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/memories/export/preview:
+    post:
+      tags: [memories]
+      summary: 预览 AGENTS.md 写入
+      description: 返回 unified diff 与当前文件哈希；不写文件。
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [project_id]
+              properties:
+                project_id: { type: string }
+      responses:
+        '200':
+          description: 预览
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ExportPreview' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/memories/export/apply:
+    post:
+      tags: [memories]
+      summary: 写入 AGENTS.md
+      description: 只替换标记块；`expected_hash` 与当前文件不一致返回 `conflict`。
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ExportApplyRequest' }
+      responses:
+        '200':
+          description: 写入结果
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ExportApplyResult' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/memories/settings:
+    patch:
+      tags: [memories]
+      summary: 修改记忆设置
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MemorySettings' }
+      responses:
+        '200':
+          description: 改完后的状态快照
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MemoryStateView' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/memories/{id}/feedback:
+    post:
+      tags: [memories]
+      summary: 这条记忆有用 / 没用
+      description: 只累加计数，影响召回权重；不改变记忆状态。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MemoryFeedbackRequest' }
+      responses:
+        '200':
+          description: 更新后的记忆
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Memory' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/entities:
+    get:
+      tags: [memories]
+      summary: 实体列表
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [person, org, project, device, recurring]
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [all, pending, active, archived]
+        - name: q
+          in: query
+          schema: { type: string }
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: 一页实体
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EntityPage' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/entities/merge:
+    post:
+      tags: [memories]
+      summary: 合并两个实体
+      description: 被合并方转 `merged`，引用与别名全部转投目标。
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EntityMergeRequest' }
+      responses:
+        '200':
+          description: 合并后的目标实体
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EntityDetail' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/entities/{id}:
+    get:
+      tags: [memories]
+      summary: 实体详情（快照 + 最近 50 条时间线）
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: 详情
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EntityDetail' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [memories]
+      summary: 改名 / 改别名 / 改状态
+      description: 撞同名唯一索引返回 `conflict`。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EntityUpdateRequest' }
+      responses:
+        '200':
+          description: 更新后的实体
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Entity' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/entities/{id}/split:
+    post:
+      tags: [memories]
+      summary: 把若干条记忆拆到新实体
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EntitySplitRequest' }
+      responses:
+        '200':
+          description: 新建的实体
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EntityDetail' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+
+  /api/grants:
+    get:
+      tags: [memories]
+      summary: 生效中的执行授权
+      description: |
+        授权是审批的缓存层：只跳过"询问"，不改变"判定"。
+        默认只列未撤销且未过期的；**没有创建端点**——它只能由用户在审批卡上勾"记住"产生。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: scope
+          in: query
+          schema: { type: string, enum: [task, session, project] }
+        - name: scope_id
+          in: query
+          schema: { type: string }
+        - name: tool
+          in: query
+          schema: { type: string }
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: 一页授权
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GrantPage' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/grants/{id}:
+    delete:
+      tags: [memories]
+      summary: 撤销一条授权
+      description: 撤销后下一次同类调用立即重新建卡；重复撤销按幂等处理。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '204': { description: 已撤销 }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: 由 `/api/auth/verify` 签发的 24 小时不透明令牌；吊销后立即失效。
+
+  parameters:
+    Cursor:
+      name: cursor
+      in: query
+      description: 上一页返回的 next_cursor，原样回传；格式对客户端不透明。
+      schema: { type: string }
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+    ConversationId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string }
+    TaskId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string }
+    ProjectId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string }
+    ModelId:
+      name: id
+      in: path
+      required: true
+      description: 模型配置 id；默认档固定为 `default`。
+      schema: { type: string }
+
+  responses:
+    BadRequest:
+      description: 请求非法
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiError' }
+    Unauthorized:
+      description: 未配对或凭据无效
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiError' }
+    MemoryUnavailable:
+      description: 记忆功能未启用（`memory.enabled=false`）或缺少可用模型
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiError' }
+    Forbidden:
+      description: 已认证但无权执行
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiError' }
+    NotFound:
+      description: 资源不存在
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiError' }
+    Conflict:
+      description: 状态冲突
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiError' }
+    TooManyRequests:
+      description: 触发限流
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiError' }
+    ServiceUnavailable:
+      description: 依赖不可用（服务端缺少 sshd、worker 未就绪等）
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiError' }
+    BadGateway:
+      description: |
+        服务端执行的外部命令失败或超时（例如 git 未安装、仓库损坏、命令超过 30 秒）。
+        属于服务端环境问题，重试通常无效，按 `hint` 排查。
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiError' }
+    PayloadTooLarge:
+      description: 请求体超过端点允许的大小
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiError' }
+    InternalError:
+      description: 服务内部错误（客户端可重试或静默降级）
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiError' }
+
+  schemas:
+    ApiError:
+      type: object
+      description: 统一错误体，所有非 2xx 响应都使用它。
+      additionalProperties: false
+      required: [code, message, retryable, hint]
+      properties:
+        code:
+          type: string
+          enum:
+            - invalid_request
+            - unauthenticated
+            - forbidden
+            - not_found
+            - conflict
+            - rate_limited
+            - approval_expired
+            - idempotency_conflict
+            - dependency_unavailable
+            - worker_unavailable
+            - skill_unknown
+            - output_missing
+            - budget_exceeded
+            - code_unavailable
+            - code_project_denied
+            - code_failed
+            - code_merge_conflict
+            - ssh_unavailable
+            - browser_unavailable
+            - browser_target_denied
+            - recording_not_found
+            - invalid_audio
+            - asr_unavailable
+            - asr_failed
+            - payload_too_large
+            - recording_quota_exceeded
+            - summary_unavailable
+            - summary_not_ready
+            - tts_unavailable
+            - summary_audio_not_ready
+            - memory_unavailable
+            - plugin_invalid
+            - plugin_conflict
+            - plugin_not_found
+            - theme_invalid
+            - theme_not_found
+            - internal_error
+        message:
+          type: string
+          description: 面向开发者的英文短句，不含用户数据。
+        retryable:
+          type: boolean
+          description: 客户端能否通过重试获益。
+        hint:
+          type: string
+          description: 面向用户的中文一句话，可直接展示。
+
+
+    CandidateDecisionRequest:
+      type: object
+      required: [ids, decision]
+      properties:
+        ids:
+          type: array
+          items: { type: string }
+        decision: { type: string, enum: [accept, reject] }
+
+    CandidateDecisionResult:
+      type: object
+      required: [accepted, rejected]
+      properties:
+        accepted: { type: integer }
+        rejected: { type: integer }
+        skipped:
+          type: array
+          items: { type: string }
+
+    BatchRevokeRequest:
+      type: object
+      properties:
+        reason: { type: [string, 'null'] }
+
+    BatchRevokeResult:
+      type: object
+      required: [batch_id, revoked]
+      properties:
+        batch_id: { type: string }
+        revoked: { type: integer }
+
+    ForgetRequest:
+      type: object
+      required: [filter]
+      properties:
+        filter:
+          type: object
+          description: 全部可选（AND 关系）；全空返回 400。
+          properties:
+            entity_id: { type: [string, 'null'] }
+            kind: { type: [string, 'null'], enum: [profile, preference, event, project, null] }
+            source: { type: [string, 'null'] }
+            before: { type: [integer, 'null'] }
+            batch_id: { type: [string, 'null'] }
+            scope: { type: [string, 'null'], enum: [global, project, null] }
+            project_id: { type: [string, 'null'] }
+        dry_run: { type: boolean, default: false }
+
+    ForgetResult:
+      type: object
+      required: [matched, forgotten, dry_run]
+      properties:
+        matched: { type: integer }
+        forgotten: { type: integer }
+        dry_run: { type: boolean }
+
+    PurgeArchivedRequest:
+      type: object
+      properties:
+        kind:
+          type: [string, 'null']
+          enum: [profile, preference, event, project, null]
+          description: 缺省 = 全部类别。
+
+    PurgeArchivedResult:
+      type: object
+      required: [purged]
+      properties:
+        purged: { type: integer }
+
+    MemoryFeedbackRequest:
+      type: object
+      required: [useful]
+      properties:
+        useful: { type: boolean }
+
+    MemorySettings:
+      type: object
+      properties:
+        heartbeat_mute:
+          type: array
+          items: { type: string, enum: [due, todo, digest_report] }
+        daily_limit: { type: integer, minimum: 0, maximum: 10 }
+        digest_enabled: { type: boolean }
+
+    ExportPreview:
+      type: object
+      required: [project_id, path, diff, entries, content_hash]
+      properties:
+        project_id: { type: string }
+        path: { type: string }
+        diff: { type: string, description: unified diff 文本 }
+        entries: { type: integer }
+        content_hash: { type: string, description: 当前文件哈希，apply 时原样回传 }
+
+    ExportApplyRequest:
+      type: object
+      required: [project_id, expected_hash]
+      properties:
+        project_id: { type: string }
+        expected_hash: { type: string }
+
+    ExportApplyResult:
+      type: object
+      required: [path, bytes]
+      properties:
+        path: { type: string }
+        bytes: { type: integer }
+
+    Entity:
+      type: object
+      required: [id, entity_type, name, status, aliases, confidence, evidence_count, created_at, updated_at]
+      properties:
+        id: { type: string }
+        entity_type:
+          type: string
+          enum: [person, org, project, device, recurring]
+        name: { type: string }
+        aliases:
+          type: array
+          items: { type: string }
+        project_id: { type: [string, 'null'] }
+        project_path: { type: [string, 'null'] }
+        status:
+          type: string
+          enum: [pending, active, archived, merged]
+        merged_into: { type: [string, 'null'] }
+        snapshot: { type: string, description: 空串表示还没有快照 }
+        snapshot_at: { type: [integer, 'null'] }
+        confidence: { type: number, format: float }
+        evidence_count: { type: integer }
+        last_evidence_at: { type: [integer, 'null'] }
+        created_at: { type: integer }
+        updated_at: { type: integer }
+
+    EntityPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Entity' }
+        next_cursor: { type: [string, 'null'] }
+
+    EntityDetail:
+      type: object
+      required: [entity, timeline, snapshots]
+      properties:
+        entity: { $ref: '#/components/schemas/Entity' }
+        timeline:
+          type: array
+          items: { $ref: '#/components/schemas/Memory' }
+        snapshots:
+          type: array
+          items:
+            type: object
+            required: [id, snapshot, evidence_count, created_at]
+            properties:
+              id: { type: string }
+              snapshot: { type: string }
+              evidence_count: { type: integer }
+              created_at: { type: integer }
+
+    EntityUpdateRequest:
+      type: object
+      properties:
+        name: { type: string }
+        aliases:
+          type: array
+          items: { type: string }
+        status: { type: string, enum: [pending, active, archived] }
+
+    EntityMergeRequest:
+      type: object
+      required: [source_id, target_id]
+      properties:
+        source_id: { type: string }
+        target_id: { type: string }
+
+    EntitySplitRequest:
+      type: object
+      required: [memory_ids]
+      properties:
+        memory_ids:
+          type: array
+          items: { type: string }
+        name: { type: string }
+
+    TimeScope:
+      type: object
+      description: 时间范围描述；给人看的标签优先，边界只在没有标签时展示。
+      properties:
+        from: { type: [integer, 'null'], description: Unix 毫秒 }
+        to: { type: [integer, 'null'], description: Unix 毫秒 }
+        label: { type: [string, 'null'] }
+
+    MemoryEvidence:
+      type: object
+      required: [id, source_kind, source_id, quote, created_at]
+      properties:
+        id: { type: string }
+        source_kind:
+          type: string
+          enum: [message, task, step, recording, code_task, explicit]
+        source_id: { type: string }
+        quote:
+          type: string
+          description: 源文本的连续子串（归一化前），原样保留。
+        support_span:
+          type: [string, 'null']
+          description: 断言依赖 `quote` 里的哪一段；必须也是 `quote` 的子串。
+        created_at: { type: integer, description: Unix 毫秒 }
+
+    Memory:
+      type: object
+      required: [id, kind, pipeline, status, scope, sensitivity, content, confidence, importance, pinned, source, valid_from, use_count, created_at, updated_at]
+      properties:
+        id: { type: string }
+        kind:
+          type: string
+          enum: [profile, preference, event, project]
+        pipeline:
+          type: string
+          enum: [subjective, objective]
+        status:
+          type: string
+          enum: [candidate, active, stale, archived, deleted]
+        scope:
+          type: string
+          enum: [global, project]
+        project_id: { type: [string, 'null'] }
+        sensitivity:
+          type: string
+          enum: [normal, private]
+          description: 私密记忆不会进入常驻摘要，只在显式召回时使用。
+        content: { type: string }
+        subject: { type: [string, 'null'] }
+        entity_id: { type: [string, 'null'] }
+        predicate: { type: [string, 'null'] }
+        time_scope:
+          oneOf:
+            - { $ref: '#/components/schemas/TimeScope' }
+            - { type: 'null' }
+        confidence: { type: number, format: float }
+        importance: { type: number, format: float }
+        pinned: { type: boolean }
+        batch_id: { type: [string, 'null'], description: 一次抽取/一次显式写入的批次 }
+        source:
+          type: string
+          enum: [explicit, session, task, recording, code_task, heartbeat, user_corrected]
+        valid_from: { type: integer, description: Unix 毫秒 }
+        valid_to: { type: [integer, 'null'] }
+        superseded_by: { type: [string, 'null'] }
+        use_count: { type: integer }
+        conflicting:
+          type: boolean
+          description: 同一主体下存在其它内容不同的 active 记忆。
+        created_at: { type: integer }
+        updated_at: { type: integer }
+
+    MemoryDetail:
+      type: object
+      required: [memory, evidence, recall_count]
+      properties:
+        memory: { $ref: '#/components/schemas/Memory' }
+        evidence:
+          type: array
+          items: { $ref: '#/components/schemas/MemoryEvidence' }
+        entity:
+          type: [object, 'null']
+          description: 主实体的一句话摘要（P3 落地；当前恒为空）。
+        recall_count: { type: integer, description: 被召回过的次数 }
+
+    MemoryPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Memory' }
+        next_cursor:
+          type: [string, 'null']
+          description: 没有下一页时整个键省略；关键词搜索也不返回它。
+
+    MemoryCreateRequest:
+      type: object
+      required: [kind, content, evidence_quote]
+      properties:
+        kind:
+          type: string
+          enum: [profile, preference, event, project]
+        content:
+          type: string
+          description: 一句话断言，上限由 `memory.extract.max_content_chars` 决定（默认 500 字）。
+        evidence_quote:
+          type: string
+          description: 用户当时说的原话；缺了返回 400——没有依据的记忆和编造没有区别。
+        subject: { type: [string, 'null'] }
+        predicate: { type: [string, 'null'] }
+        time_scope:
+          oneOf:
+            - { $ref: '#/components/schemas/TimeScope' }
+            - { type: 'null' }
+        scope: { type: string, enum: [global, project] }
+        project_id: { type: [string, 'null'] }
+        pipeline: { type: string, enum: [subjective, objective] }
+        sensitivity: { type: string, enum: [normal, private] }
+        pinned: { type: boolean }
+
+    MemoryUpdateRequest:
+      type: object
+      description: 只传要改的字段；`status` 只允许 active / archived，删除走 DELETE。
+      properties:
+        content: { type: string }
+        pinned: { type: boolean }
+        sensitivity: { type: string, enum: [normal, private] }
+        kind: { type: string, enum: [profile, preference, event, project] }
+        status: { type: string, enum: [active, archived] }
+        time_scope:
+          oneOf:
+            - { $ref: '#/components/schemas/TimeScope' }
+            - { type: 'null' }
+
+    MemoryCounts:
+      type: object
+      properties:
+        candidate: { type: integer }
+        active: { type: integer }
+        stale: { type: integer }
+        archived: { type: integer }
+
+    DigestSummary:
+      type: object
+      properties:
+        chars: { type: integer, description: 当前摘要的字数 }
+        memory_items: { type: integer, description: 参与注入的记忆条数 }
+        generated_at: { type: integer, description: 计算时刻，Unix 毫秒 }
+
+    ExtractQuota:
+      type: object
+      properties:
+        enabled: { type: boolean }
+        daily_limit: { type: integer }
+        used_today: { type: integer }
+
+    HeartbeatView:
+      type: object
+      properties:
+        enabled: { type: boolean }
+        last_scan_at: { type: [integer, 'null'] }
+        daily_limit: { type: integer }
+        delivered_today: { type: integer }
+
+    MaintenanceReportView:
+      type: object
+      properties:
+        recomputed: { type: integer, description: 重算成功的实体快照数 }
+        failed: { type: integer, description: 重算失败的实体数，保留旧快照下次再试 }
+        sedimented: { type: integer, description: 投递成抽取的录音 / 编码任务数 }
+        decayed: { type: integer, description: 衰减归档的记忆条数 }
+        consolidated: { type: integer, description: 归并掉的记忆条数 }
+        model_available:
+          type: boolean
+          description: 没有可用模型时为 false：快照重算被跳过，其余三步照常。
+
+    MaintenanceView:
+      type: object
+      required: [organizing]
+      properties:
+        organizing:
+          type: boolean
+          description: 是否有一轮整理正在跑（手动与夜间共用同一道闸门）。
+        last_organized_at:
+          type: [integer, 'null']
+          description: 最近一次整理完成的时刻，Unix 毫秒。手动与夜间都写。
+        last_report:
+          anyOf:
+            - { $ref: '#/components/schemas/MaintenanceReportView' }
+            - { type: 'null' }
+
+    OrganizeAck:
+      type: object
+      required: [started_at]
+      properties:
+        started_at:
+          type: integer
+          description: 本次整理的开始时刻，Unix 毫秒；据此比对 `last_organized_at` 判断是否跑完。
+
+    MemoryStateView:
+      type: object
+      required: [enabled, counts, digest, extract, heartbeat]
+      properties:
+        enabled:
+          type: boolean
+          description: 对应配置项 memory.enabled；为 false 时其余字段都是空值。
+        counts: { $ref: '#/components/schemas/MemoryCounts' }
+        digest: { $ref: '#/components/schemas/DigestSummary' }
+        extract: { $ref: '#/components/schemas/ExtractQuota' }
+        heartbeat: { $ref: '#/components/schemas/HeartbeatView' }
+        maintenance:
+          $ref: '#/components/schemas/MaintenanceView'
+        digest_warning:
+          type: [string, 'null']
+          description: 摘要生成不出来时给用户看的一句话（目前只有"置顶超出预算"）。
+
+    DigestListItem:
+      type: object
+      required: [id, chars, created_at]
+      properties:
+        id: { type: string }
+        chars: { type: integer }
+        created_at: { type: integer }
+
+    DigestView:
+      type: object
+      required: [id, content, chars, created_at, memory_ids]
+      properties:
+        id: { type: string }
+        content: { type: string, description: 当时注入给模型的完整文本 }
+        chars: { type: integer }
+        created_at: { type: integer }
+        memory_ids:
+          type: array
+          items: { type: string }
+
+
+    Grant:
+      type: object
+      required: [id, tool, risk, scope, scope_id, approved_by, created_at, expires_at, hit_count]
+      properties:
+        id: { type: string }
+        tool: { type: string, description: 与 worker 侧同名，如 code.write }
+        risk:
+          type: string
+          enum: [read, reversible_write, irreversible_write]
+        scope:
+          type: string
+          enum: [task, session, project]
+        scope_id:
+          type: string
+          description: task_id / conversation_id / project_id，服务端解析，客户端不可指定
+        approved_by: { type: string, description: 批准它的那条审批记录 id }
+        created_at: { type: integer }
+        expires_at: { type: integer }
+        revoked_at: { type: [integer, 'null'] }
+        last_hit_at: { type: [integer, 'null'] }
+        hit_count: { type: integer }
+
+    GrantPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Grant' }
+        next_cursor: { type: [string, 'null'] }
+
+    SshTunnelInfo:
+      type: object
+      description: SSH 隧道可用性预检结果。
+      additionalProperties: false
+      required: [enabled, target, sshd_reachable]
+      properties:
+        enabled:
+          type: boolean
+          description: 服务端是否开启 SSH 隧道（`ssh.enabled`）。
+        target:
+          type: string
+          description: 隧道终点，形如 `127.0.0.1:22`；只可能是回环地址。
+        sshd_reachable:
+          type: boolean
+          description: 终点当前是否可连。`enabled=false` 时恒为 false。
+
+    BrowserTunnelInfo:
+      type: object
+      description: 浏览器隧道可用性预检结果。
+      additionalProperties: false
+      required: [enabled, loopback_only, allowed_ports, max_tunnels]
+      properties:
+        enabled:
+          type: boolean
+          description: 服务端是否开启浏览器隧道（`browser.enabled`）。
+        loopback_only:
+          type: boolean
+          description: 是否只允许回环目标。本版恒为 true。
+        allowed_ports:
+          type: array
+          items: { type: integer, minimum: 1, maximum: 65535 }
+          description: 允许访问的回环端口白名单。
+        max_tunnels:
+          type: integer
+          description: 全局并发隧道上限（按 TCP 连接计）。
+
+    PairRequest:
+      type: object
+      additionalProperties: false
+      required: [code, device_name, platform, client_pubkey]
+      properties:
+        code: { type: string, description: 12 位配对码 }
+        device_name: { type: string }
+        platform: { type: string, enum: [macos, windows, linux, android, ios] }
+        client_pubkey: { type: string, description: base32 编码的 Ed25519 公钥 }
+
+    PairPending:
+      type: object
+      required: [request_id, expires_at]
+      properties:
+        request_id: { type: string }
+        expires_at: { type: integer, description: Unix 毫秒时间戳 }
+
+    PairConfirmRequest:
+      type: object
+      additionalProperties: false
+      required: [request_id, approve]
+      properties:
+        request_id: { type: string }
+        approve: { type: boolean }
+
+    PairResult:
+      type: object
+      required: [accepted, reason]
+      properties:
+        accepted: { type: boolean }
+        reason: { type: string }
+        device_id: { type: string }
+        server_pubkey: { type: string }
+        server_fingerprint: { type: string, description: 分组显示的指纹，供人工核对 }
+
+    ChallengeRequest:
+      type: object
+      additionalProperties: false
+      required: [device_id]
+      properties:
+        device_id: { type: string }
+
+    ChallengeResponse:
+      type: object
+      required: [challenge, expires_at]
+      properties:
+        challenge: { type: string }
+        expires_at: { type: integer, description: Unix 毫秒时间戳 }
+
+    VerifyRequest:
+      type: object
+      additionalProperties: false
+      required: [device_id, challenge, signature]
+      properties:
+        device_id: { type: string }
+        challenge: { type: string }
+        signature: { type: string }
+
+    SessionResponse:
+      type: object
+      required: [token, expires_at]
+      properties:
+        token: { type: string }
+        expires_at: { type: integer, description: Unix 毫秒时间戳 }
+
+    ProjectMode:
+      type: string
+      enum: [code, work]
+      description: |
+        `code`：Git 项目，绑定 git 仓库，允许编码任务（隔离工作树、补丁、审批后合并）。
+        `work`：普通项目，绑定任意目录，不提供任何 Git 能力。
+
+    Project:
+      type: object
+      required: [id, name, mode, path, conversation_count, task_count, created_at, updated_at]
+      properties:
+        id: { type: string }
+        name:
+          type: string
+          description: 展示名；创建时留空则取目录名。
+        mode:
+          allOf:
+            - $ref: '#/components/schemas/ProjectMode'
+          description: |
+            能力类型。界面已不展示、也不按它过滤，仅用于判定能否派编码任务；
+            始终以服务端记录为准，客户端传值只影响创建。
+        path:
+          type: string
+          description: 服务端电脑上的绝对路径（规范化后的真实路径）。
+        conversation_count:
+          type: integer
+          description: 该项目下未删除的会话数。
+        task_count:
+          type: integer
+          description: 该项目下未删除的任务数（归属经会话派生）。
+        created_at: { type: integer, description: Unix 毫秒时间戳 }
+        updated_at: { type: integer, description: Unix 毫秒时间戳 }
+
+    ProjectCreate:
+      type: object
+      additionalProperties: false
+      required: [mode, path]
+      properties:
+        name: { type: string, description: 留空时取目录名 }
+        mode: { $ref: '#/components/schemas/ProjectMode' }
+        path:
+          type: string
+          description: 服务端电脑上的绝对路径；必须在允许浏览的根目录内。
+        init_git:
+          type: boolean
+          default: false
+          description: |
+            `mode=code` 且目录还不是可用仓库时，允许服务端执行初始化：
+            `git init`（分支 main，缺仓库时）+ 一个**空提交**。不改动目录里已有的文件、
+            不写 README、不改 `.gitignore`。
+            默认 false —— 往用户磁盘上写东西必须由人在确认框里点一次。
+            `detached`（游离 HEAD）不能靠它修好，带了这个字段仍然返回 400。
+
+    ProjectPreflight:
+      type: object
+      additionalProperties: false
+      required: [path, mode, ready, git, can_init]
+      properties:
+        path:
+          type: string
+          description: 规范化后的真实路径（客户端应展示它，而不是回显用户输入）。
+        mode: { $ref: '#/components/schemas/ProjectMode' }
+        ready: { type: boolean, description: 能否直接创建。 }
+        git:
+          allOf:
+            - $ref: '#/components/schemas/GitState'
+          description: Git 项目的 git 前置状态；普通项目恒为 `not_applicable`。
+        git_detail:
+          type: string
+          description: |
+            `nested` 时是所属仓库路径；`ready` 时是当前分支名；其余省略。
+        can_init:
+          type: boolean
+          description: "为 true 时客户端可带 `init_git: true` 重试（先弹确认框）。"
+        reason:
+          type: string
+          description: 面向用户的原因与改法；`ready` 时省略。
+
+    GitState:
+      type: string
+      enum: [ready, missing, nested, no_commits, detached, not_applicable]
+      description: |
+        - `ready`：已是仓库根、有提交、非游离 HEAD
+        - `missing`：目录本身不是仓库
+        - `nested`：目录属于别的仓库，但不是仓库根
+        - `no_commits`：是仓库根但还没有提交
+        - `detached`：HEAD 游离（初始化修不了，需人工切分支）
+        - `not_applicable`：与 git 无关（普通项目）
+
+    ProjectUpdate:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name: { type: string }
+
+    DirEntry:
+      type: object
+      required: [name, path, kind]
+      properties:
+        name: { type: string }
+        path: { type: string, description: 绝对路径 }
+        kind:
+          type: string
+          enum: [dir, repo]
+          description: '`repo` 表示该目录是 git 仓库根，可直接建成 Git 项目。'
+
+    DirListing:
+      type: object
+      required: [path, roots, entries]
+      properties:
+        path: { type: string, description: 当前目录的规范化绝对路径 }
+        parent:
+          type: [string, 'null']
+          description: 上一级目录；已在允许根目录时省略（客户端据此禁用「上一级」）。
+        roots:
+          type: array
+          description: 允许浏览的根目录，随响应下发，客户端不必自己猜起点。
+          items: { type: string }
+        entries:
+          type: array
+          items: { $ref: '#/components/schemas/DirEntry' }
+
+    ProjectEntry:
+      type: object
+      required: [name, path, kind]
+      properties:
+        name: { type: string }
+        path:
+          type: string
+          description: 规范化后的绝对路径；客户端下游请求直接回传，不自己拼。
+        kind:
+          type: string
+          enum: [dir, file]
+        size:
+          type: integer
+          description: 文件字节数；目录没有这个字段。
+
+    ProjectListing:
+      type: object
+      required: [path, entries]
+      properties:
+        path:
+          type: string
+          description: 本次列出的规范化绝对路径（省略请求路径时由服务端解析根目录）。
+        entries:
+          type: array
+          items: { $ref: '#/components/schemas/ProjectEntry' }
+        truncated:
+          type: boolean
+          description: 该层条目超过 200 条上限时为 true。
+
+    FileContent:
+      type: object
+      required: [path, size, text]
+      properties:
+        path: { type: string, description: 文件绝对路径 }
+        size:
+          type: integer
+          description: 文件在磁盘上的完整字节数（不是 `text` 的长度）。
+        text:
+          type: string
+          description: 文本内容；超过 512 KB 时只保留前一部分。
+        truncated:
+          type: boolean
+          description: 内容是否因超过上限被截断。
+
+    GitFileState:
+      type: string
+      enum: [modified, added, deleted, renamed, copied, type_changed, unmerged, untracked]
+      description: |
+        一个文件在某一侧（暂存区 / 工作区）的状态，取自 `git status --porcelain` 的字母：
+        `M`→modified、`A`→added、`D`→deleted、`R`→renamed、`C`→copied、
+        `T`→type_changed、`U`→unmerged，未跟踪单列 untracked。
+
+    GitFileChange:
+      type: object
+      additionalProperties: false
+      required: [path, state]
+      properties:
+        path:
+          type: string
+          description: 仓库内相对路径（`/` 分隔）；重命名时是新路径。
+        orig_path:
+          type: string
+          description: 重命名 / 复制的源路径；其余省略。
+        state: { $ref: '#/components/schemas/GitFileState' }
+
+    GitOperation:
+      type: string
+      enum: [merge, rebase, cherry_pick, revert]
+      description: |
+        仓库正处于的多步操作中间态。此时面板只读：提交会把半截的现场再叠一层。
+
+    GitCommitSummary:
+      type: object
+      additionalProperties: false
+      required: [hash, short_hash, subject, author, time_ms]
+      properties:
+        hash: { type: string, description: 完整 40 位 sha }
+        short_hash: { type: string, description: git 自己截的短 sha（长度随仓库规模变化） }
+        subject: { type: string, description: 首行标题 }
+        author: { type: string, description: 作者名（不下发邮箱） }
+        time_ms: { type: integer, description: 作者时间，Unix 毫秒 }
+
+    GitStatusReport:
+      type: object
+      additionalProperties: false
+      required: [repo, detached, staged, unstaged, untracked]
+      properties:
+        repo:
+          type: boolean
+          description: 项目目录本身是不是 git 仓库根；false 时是空态而非错误。
+        branch:
+          type: string
+          description: 当前分支名；游离 HEAD 或还没有任何提交时省略。
+        detached:
+          type: boolean
+          description: HEAD 游离（不在任何分支上）。
+        head:
+          allOf:
+            - $ref: '#/components/schemas/GitCommitSummary'
+          description: HEAD 指向的提交；空仓库时省略。
+        operation:
+          allOf:
+            - $ref: '#/components/schemas/GitOperation'
+          description: 进行中的多步操作；正常状态省略。
+        reason:
+          type: string
+          description: '`repo=false` 时的原因（不是仓库 / 属于别的仓库）；其余省略。'
+        staged:
+          type: array
+          description: 已暂存（索引相对 HEAD）。
+          items: { $ref: '#/components/schemas/GitFileChange' }
+        unstaged:
+          type: array
+          description: 未暂存（工作区相对索引）。同一个文件可以同时在 staged 与这里出现。
+          items: { $ref: '#/components/schemas/GitFileChange' }
+        untracked:
+          type: array
+          description: 未跟踪。
+          items: { $ref: '#/components/schemas/GitFileChange' }
+
+    GitDiffReport:
+      type: object
+      additionalProperties: false
+      required: [staged, text]
+      properties:
+        path:
+          type: string
+          description: 仓库内相对路径；整次提交的 diff 时省略。
+        staged: { type: boolean, description: 看的是暂存区（`--cached`）。 }
+        commit: { type: string, description: 看的是某次提交时，这里是解析后的完整 sha。 }
+        text:
+          type: string
+          description: 统一格式的 diff 文本；二进制文件为空。
+        truncated:
+          type: boolean
+          description: 文本是否因超过 512 KiB 被截断。
+        binary:
+          type: boolean
+          description: 二进制文件，没有可渲染的文本。
+        additions: { type: integer, description: 新增行数（二进制为 0）。 }
+        deletions: { type: integer, description: 删除行数。 }
+
+    GitPathsRequest:
+      type: object
+      additionalProperties: false
+      required: [paths]
+      properties:
+        paths:
+          type: array
+          minItems: 1
+          maxItems: 200
+          description: |
+            仓库内相对路径。绝对路径、含 `..` 的路径、`.git` 内部路径一律拒绝
+            （400 `code_project_denied`）。
+          items: { type: string }
+
+    GitCommitRequest:
+      type: object
+      additionalProperties: false
+      required: [message]
+      properties:
+        message:
+          type: string
+          description: 提交信息（含 body），最多 4000 字，原样交给 `git commit -m`。
+
+    GitCommitResult:
+      type: object
+      additionalProperties: false
+      required: [commit, status]
+      properties:
+        commit: { $ref: '#/components/schemas/GitCommitSummary' }
+        status: { $ref: '#/components/schemas/GitStatusReport' }
+
+    GitCommitsPage:
+      type: object
+      additionalProperties: false
+      required: [commits, has_more]
+      properties:
+        commits:
+          type: array
+          items: { $ref: '#/components/schemas/GitCommitSummary' }
+        has_more:
+          type: boolean
+          description: 还有更早的提交（客户端据此显示「加载更多」）。
+
+    Conversation:
+      type: object
+      required: [id, project_id, title, mode, created_at, updated_at]
+      properties:
+        id: { type: string }
+        project_id:
+          type: string
+          description: 所属项目；**空串表示无归属直聊**（不挂项目，走基础系统提示与全局记忆）
+        title:
+          type: string
+          description: |
+            会话标题。创建时可显式指定；不指定时为「新会话」占位，
+            首条用户消息到达后由服务端按该提问生成（短提问直接取用，
+            长提问由模型概括）。仅在标题仍为占位时写入，不会覆盖用户命名。
+        mode: { type: string, enum: [text, staged, realtime] }
+        device_id: { type: string }
+        archived: { type: boolean }
+        created_at: { type: integer, description: Unix 毫秒时间戳 }
+        updated_at: { type: integer, description: Unix 毫秒时间戳 }
+
+    ConversationCreate:
+      type: object
+      additionalProperties: false
+      properties:
+        project_id:
+          type: string
+          description: |
+            归属项目；决定会话的能力边界（例如能否派编码任务）。
+            省略或空串 = **无归属直聊**：不挂项目，也没有编码技能与任务落点。
+        title:
+          type: string
+          description: |
+            会话标题。省略（或只含空白）时取占位值「新会话」，并命中项目里的
+            空白会话复用规则（见 `POST /api/conversations`）；显式给出时总是新建。
+        mode: { type: string, enum: [text, staged, realtime], default: text }
+
+    ConversationUpdate:
+      type: object
+      additionalProperties: false
+      required: [title]
+      properties:
+        title:
+          type: string
+          description: 会话标题；trim 后不可为空，上限 24 字（与自动生成标题同一口径）。
+
+    ConversationDetail:
+      allOf:
+        - $ref: '#/components/schemas/Conversation'
+        - type: object
+          properties:
+            recent_messages:
+              type: array
+              items: { $ref: '#/components/schemas/Message' }
+            compaction:
+              allOf:
+                - $ref: '#/components/schemas/Compaction'
+              description: |
+                这个会话的上下文压缩状态。从未压缩过时整段省略，
+                旧客户端解析不受影响。
+
+    Compaction:
+      type: object
+      description: |
+        一次成功压缩在客户端眼里的样子。它只描述「模型看到的那份上下文」，
+        不改变消息流：原文一条不删，客户端据此在 `anchor_message_id` 处插一条横条。
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [ready, pending]
+          description: |
+            `ready` 摘要可用；`pending` 正在整理。用字符串而不是布尔，是为了将来
+            添状态不必升级契约；客户端把未知值按「未知」渲染。
+        summary:
+          type: string
+          description: 摘要正文；`pending` 或旧记录没有正文时省略。
+        anchor_message_id:
+          type: string
+          description: |
+            压缩边界：第一条**没被折叠**的消息 id。这是**位置锚点**，不是区间端点——
+            客户端插横条全靠它，不要把它当某个消息区间的开始去算长度。
+        source_messages:
+          type: integer
+          minimum: 0
+          description: 被折叠的消息条数。
+        model:
+          type: string
+          description: 生成摘要用的模型。
+        updated_at:
+          type: integer
+          description: 摘要生成时间（Unix 毫秒时间戳）。
+        tokens:
+          allOf:
+            - $ref: '#/components/schemas/CompactionTokens'
+          description: 这次整理调用花掉的 token；网关没给时为估算值。
+        elapsed_ms:
+          type: integer
+          description: 这次整理调用的耗时（毫秒）。
+        last_failure:
+          allOf:
+            - $ref: '#/components/schemas/CompactionFailure'
+          description: |
+            最近一次失败，可能发生在这条成功记录之前。与 `summary` 相互独立：
+            上一次失败、这一次成功时两者同时存在，客户端在抽屉里多显示一行小字，
+            而不是把成功摘要画成错误态。
+
+    CompactionTokens:
+      type: object
+      description: |
+        一次整理调用的用量。与 `TokenUsage` 分开：那个是「一轮回答」的口径
+        （`prompt_tokens` 含工具续轮累加），这个只是一次非流式补全。
+      properties:
+        prompt_tokens: { type: integer }
+        completion_tokens: { type: integer }
+        tokens_estimated:
+          type: boolean
+          description: 网关没回 usage、按字符估算时为 true，界面用"约"表述
+
+    CompactionFailure:
+      type: object
+      required: [error, at]
+      description: 一次失败的整理尝试。
+      properties:
+        error:
+          type: string
+          description: 面向用户的一句话原因（上游报错 / 摘要为空 / 超时 / 达到输出上限）。
+        at:
+          type: integer
+          description: 失败时间（Unix 毫秒时间戳）。
+        model:
+          type: string
+          description: 当时用的模型；模型没配起来就失败时省略。
+
+    ConversationPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Conversation' }
+        next_cursor: { type: [string, 'null'] }
+
+    Attachment:
+      type: object
+      description: |
+        用户随消息上传的一枚附件（输入框里那枚 chip 的元信息）。
+        正文按 `id` 走 `GET /api/attachments/{id}/content` 取，消息里不带字节。
+      required: [id, name, kind, mime, bytes]
+      properties:
+        id: { type: string }
+        name:
+          type: string
+          description: 原始文件名，仅用于展示；不含目录结构
+        kind:
+          type: string
+          enum: [image, file]
+          description: 客户端据此决定画缩略图还是文档图标
+        mime: { type: string }
+        bytes: { type: integer }
+        width:
+          type: integer
+          description: 图片像素宽；非图片或客户端没给时省略
+        height: { type: integer }
+
+    Message:
+      type: object
+      required: [id, conversation_id, role, created_at]
+      properties:
+        id: { type: string }
+        conversation_id: { type: string }
+        role:
+          type: string
+          enum: [user, assistant, tool, system]
+          description: |
+            `system` 是系统提示（例如「已记住：…」）：客户端居中渲染、不套气泡，
+            且不进入后续对话上下文（服务端构建上下文时跳过）。
+        content: { type: string, description: 正文；来源不内联，见 sources }
+        sources:
+          type: array
+          description: 回答引用的来源；为空时字段省略
+          items: { $ref: '#/components/schemas/MessageSource' }
+        task_suggestions:
+          type: array
+          description: |
+            回答附带的"要不要我办"建议；为空时字段省略。客户端据此渲染建议卡，
+            用户点击后才调用 `POST /api/tasks`，服务端不会自动创建任务。
+          items: { $ref: '#/components/schemas/TaskSuggestion' }
+        file_writes:
+          type: array
+          description: |
+            本轮生成或待确认覆盖的文件；为空时字段省略。与 SSE
+            `file_write_request` 事件同源，历史回看与实时渲染共用同一份状态。
+          items: { $ref: '#/components/schemas/FileWrite' }
+        steps:
+          type: array
+          description: |
+            本轮的执行过程（按发生顺序）；没有调用工具时字段省略。
+            与 SSE `tool_activity`（过程）和 `message_completed.steps`（权威版）同源，
+            落库的意义是刷新之后仍能展开查看。
+          items: { $ref: '#/components/schemas/MessageStep' }
+        attachments:
+          type: array
+          description: |
+            用户在输入框里附上的文件 / 图片；为空时字段省略。
+            与 `media` 方向相反：那个是模型产出给用户看的，这个是用户交给模型的。
+          items: { $ref: '#/components/schemas/Attachment' }
+        task_id: { type: [string, 'null'] }
+        created_at: { type: integer, description: Unix 毫秒时间戳 }
+        elapsed_ms:
+          type: [integer, 'null']
+          description: 从收到提问到答案落库的耗时（毫秒）；用户消息与历史旧行为 null
+        usage:
+          allOf:
+            - $ref: '#/components/schemas/TokenUsage'
+          description: 这一轮回答的 token 用量；没开模型或网关没给时为 null
+        finish_reason:
+          type: [string, 'null']
+          enum: [stop, error, stopped, null]
+          description: |
+            回答终态。`stop` 正常写完，`error` 中途出错，`stopped` 用户点了停止
+            （半截回答照样落库）。历史旧行为 null，客户端按"已完成"处理。
+
+
+    TokenUsage:
+      type: object
+      properties:
+        prompt_tokens: { type: integer, description: 整轮（含工具调用续轮）累加的输入 token }
+        completion_tokens: { type: integer }
+        tokens_estimated:
+          type: boolean
+          description: 网关没回 usage、按字符估算时为 true，界面用"约"表述
+        context_tokens:
+          type: integer
+          description: |
+            本轮**最后一次**模型调用的输入 token 数，即"当前上下文长度"。
+            与 `prompt_tokens`（整轮累加）口径不同：客户端用它除以模型
+            `context_window` 得到输入栏的"上下文已用"占比。
+            历史旧行没有这一列，读回为 0（界面显示空环，不拿累加值充数）。
+
+    FileWrite:
+      type: object
+      description: |
+        会话里生成的一个文件。新建成功时直接是 `written`；与磁盘上的同名文件
+        冲突时先落 `pending`，用户通过 `POST /api/conversations/{id}/file-writes/{request_id}`
+        决定后才变成 `written` / `rejected`。
+
+        `path` 一律是根内相对路径（项目相对或草稿相对），不暴露绝对路径；
+        只有 `backup_path` 是绝对路径，因为用户要拿它去还原文件。
+      required: [request_id, path, scope, status, bytes, created_at]
+      properties:
+        request_id: { type: string }
+        path: { type: string, description: 根内相对路径 }
+        scope:
+          type: string
+          enum: [project, draft]
+          description: "`project` 写会话所属项目，`draft` 写会话草稿目录"
+        status:
+          type: string
+          enum: [written, pending, rejected, expired, failed, superseded]
+          description: |
+            `superseded` 表示同一路径上出现了更新的一次写入，旧卡作废。
+            客户端只按这个值决定文案与按钮，不自行推断。
+        bytes: { type: integer, description: 本次写入的字节数 }
+        existing_bytes: { type: integer, description: 被覆盖文件的字节数；新建为 0 }
+        backup_path:
+          type: [string, 'null']
+          description: 覆盖前的备份绝对路径；没有覆盖时为 null
+        expires_at:
+          type: [integer, 'null']
+          description: 待确认请求的失效时刻（Unix 毫秒）；已决策时为 null
+        created_at: { type: integer, description: Unix 毫秒时间戳 }
+
+    MessageStep:
+      type: object
+      description: |
+        一次工具执行，给界面的"执行过程"列表用。`label` 由服务端拼好
+        （例如「已读取 calculator2.html」），客户端不认工具名。
+      required: [tool, label, ok]
+      properties:
+        tool: { type: string }
+        label: { type: string, description: 面向用户的一句话 }
+        target:
+          type: string
+          description: 审计用的对象标识（`file:a.html:1-20`、URL），客户端只用于 tooltip
+        ok: { type: boolean, description: 这一步是否成功 }
+        elapsed_ms: { type: integer, description: 该步耗时（毫秒） }
+
+    PreviewTarget:
+      type: object
+      description: |
+        把一个服务端文件换成可加载地址。`url` 带预览站的随机端口与访问令牌，
+        只用于客户端加载；`display` 是可读的逻辑地址（项目名或"草稿" + 相对路径）。
+      required: [url, display]
+      properties:
+        url: { type: string }
+        display: { type: string }
+
+    MessageSource:
+      type: object
+      description: |
+        回答引用的一条来源。`kind` 与 `memory_id` 是新字段：历史数据没有这两个键，
+        客户端必须按默认值（`web` / 空）解析，**不能**因为缺字段整批丢弃。
+      required: [url, fetched_at]
+      properties:
+        url:
+          type: string
+          description: 网页来源是 URL；记忆来源用稳定标识 `memory://{id}`。
+        fetched_at: { type: integer, description: 采集时间，Unix 毫秒 }
+        kind:
+          type: string
+          enum: [web, memory, doc]
+          default: web
+          description: 来源类型。缺省为 `web`。
+        memory_id:
+          type: [string, 'null']
+          description: 记忆来源才有：`memories.id`，客户端据此跳详情。
+
+    TaskSuggestion:
+      type: object
+      required: [skill, reason]
+      properties:
+        skill:
+          type: string
+          description: 建议使用的技能名；必须是当前可用技能之一
+        reason:
+          type: string
+          description: 面向用户的一句话理由，服务端截断到 80 字
+        input:
+          type: object
+          description: 预填的任务参数；用户点击后原样作为 TaskCreateRequest.input
+
+    MessagePage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Message' }
+        next_cursor: { type: [string, 'null'] }
+
+    SendMessageRequest:
+      type: object
+      additionalProperties: false
+      required: [content]
+      properties:
+        content:
+          type: string
+          description: |
+            正文。可以留空——只发附件（"就发这张图"）是完整意图，
+            此时 `attachments` 必须非空，否则返回 `invalid_request`。
+        attachments:
+          type: array
+          description: |
+            已上传附件的 id 列表（`POST /api/attachments` 的返回），按 chip 顺序。
+            只传 id：文件名、类型、字节数都以服务端登记的那份为准。
+            附件必须属于本设备且未被别的消息用过，否则分别返回 `forbidden` / `conflict`。
+          items: { type: string }
+
+    StopRequest:
+      type: object
+      additionalProperties: false
+      required: [client_msg_id]
+      properties:
+        client_msg_id:
+          type: string
+          description: 与发送消息时携带的是同一个值；服务端用它寻址正在生成的那一轮。
+
+    TaskState:
+      type: string
+      enum: [queued, running, needs_input, needs_approval, succeeded, failed, canceled]
+
+    Task:
+      type: object
+      required: [id, conversation_id, type, state, created_at, updated_at]
+      properties:
+        id: { type: string }
+        conversation_id: { type: string }
+        type: { type: string, description: 'skill:<name> 或能力标识' }
+        skill: { type: [string, 'null'] }
+        state: { $ref: '#/components/schemas/TaskState' }
+        plan:
+          type: array
+          items: { $ref: '#/components/schemas/PlanStep' }
+        pending_approval: { $ref: '#/components/schemas/Approval' }
+        artifacts:
+          type: array
+          items: { $ref: '#/components/schemas/Artifact' }
+        error: { $ref: '#/components/schemas/ApiError' }
+        retry_count: { type: integer, description: 已重试次数 }
+        created_at: { type: integer, description: Unix 毫秒时间戳 }
+        updated_at: { type: integer, description: Unix 毫秒时间戳 }
+        finished_at:
+          type: [integer, 'null']
+          description: 执行结束时间（终态才有），与 updated_at 区分
+        worktree:
+          allOf:
+            - $ref: '#/components/schemas/WorktreeInfo'
+          description: |
+            编码任务的现场（隔离工作树 + 任务分支）。只有**详情**端点会填充，
+            列表一律省略；普通任务、从来没准备成功的、已清理过的都没有这个字段。
+        idempotency_key:
+          type: string
+          description: |
+            创建时的幂等键。客户端用它把回答里的建议卡和真实任务对上号；
+            任务删除后该键会被清空，因此也可能缺省。
+
+    WorktreeInfo:
+      type: object
+      additionalProperties: false
+      required: [path, branch, exists]
+      properties:
+        path:
+          type: string
+          description: 隔离工作树的绝对路径（`{worktree_dir}/{task_id}/wt`）。
+        branch:
+          type: string
+          description: 任务分支（`agent/{task_id}`）。合并回原仓库后仍然保留。
+        exists:
+          type: boolean
+          description: 工作树目录是否还在（清理过或未准备成功时为 false）。
+
+    PlanStep:
+      type: object
+      required: [seq, name, state]
+      properties:
+        seq: { type: integer }
+        name: { type: string }
+        state: { type: string, enum: [pending, running, done, skipped, failed] }
+        output:
+          type: string
+          description: >-
+            最近一次过程摘要（多行纯文本）。编码任务的"执行编码"一步每 5 秒刷新一次，
+            内容是最近几个工具调用与结果。缺省表示这个步骤还没有过程信息。
+        updated_at:
+          type: integer
+          description: >-
+            过程摘要的生成时间（Unix 毫秒）。与任务级 `updated_at` 不同：
+            进度刷新不写 `tasks.updated_at`（那个字段只由状态转移写，用于悬空任务回收）。
+
+    TaskCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [conversation_id, type]
+      properties:
+        conversation_id: { type: string }
+        type: { type: string, description: 'skill:<name> 或能力标识' }
+        skill: { type: [string, 'null'] }
+        input: { type: object, description: 任务参数，由 skill 定义结构 }
+        idempotency_key:
+          type: [string, 'null']
+          description: 幂等键；同一个键重复提交返回同一任务
+
+    PrepareTaskRequest:
+      type: object
+      additionalProperties: false
+      required: [conversation_id, skill, text]
+      properties:
+        conversation_id: { type: string }
+        skill: { type: string, description: 必须是当前可用技能之一 }
+        text:
+          type: string
+          description: 用户原话。服务端会原样保留进 `input.text`。
+
+    PrepareSource:
+      type: string
+      enum: [model, fallback]
+      description: |
+        `model`：模型解析成功。
+        `fallback`：没有模型、超时或输出不可解析，此时 `input` 只含原话。
+
+    PreparedTaskInput:
+      type: object
+      required: [skill, input, source]
+      properties:
+        skill: { type: string }
+        input:
+          type: object
+          description: 任务参数，一定是对象且一定含 `text`（用户原话）
+        source: { $ref: '#/components/schemas/PrepareSource' }
+        missing:
+          type: array
+          description: |
+            技能声明需要、这次没拿到的字段（如 `["url"]`）。与 `source` 解耦：
+            模型解析成功但漏字段时同样会列出。
+          items: { type: string }
+
+    TaskPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Task' }
+        next_cursor: { type: [string, 'null'] }
+
+    CodeProviderCapabilities:
+      type: object
+      additionalProperties: false
+      required: [tool_approval, append_message, switch_model, stream_events]
+      properties:
+        tool_approval:
+          type: string
+          enum: [native, degraded, unsupported]
+          description: native = 可逐次放行/驳回；degraded = 只能整任务终止；unsupported = 只能合并前审批
+        append_message: { type: boolean, description: 运行中能否追加需求 }
+        switch_model: { type: boolean, description: 能否按任务换模型档位 }
+        stream_events: { type: boolean, description: 是否产出可解析的流式事件 }
+
+    CodeProvider:
+      type: object
+      additionalProperties: false
+      required: [id, enabled, available, capabilities]
+      properties:
+        id: { type: string, enum: [opencode, codebuddy, codex, claude] }
+        enabled: { type: boolean, description: 未被显式禁用；未登记在 code.providers 里也按 true 返回 }
+        available: { type: boolean, description: 未被显式禁用且可执行文件存在，客户端据此决定能否被选为执行方式 }
+        bin: { type: string, nullable: true, description: 配置的可执行文件路径；为空走 PATH }
+        capabilities: { $ref: '#/components/schemas/CodeProviderCapabilities' }
+
+    CodeProviders:
+      type: object
+      additionalProperties: false
+      required: [default_provider, available, providers, routing]
+      properties:
+        default_provider: { type: string }
+        available:
+          type: array
+          description: |
+            按路由优先级排好的可用 provider：preferred → fallback → default_provider →
+            其余已注册且可用的（按注册表顺序）。末尾那一档不参与自动路由，只让显式点名生效。
+          items: { type: string }
+        providers:
+          type: array
+          items: { $ref: '#/components/schemas/CodeProvider' }
+        routing:
+          type: object
+          additionalProperties: false
+          required: [preferred, fallback, tiers]
+          properties:
+            preferred: { type: array, items: { type: string } }
+            fallback: { type: array, items: { type: string } }
+            tiers:
+              type: object
+              additionalProperties: false
+              required: [fast, strong]
+              properties:
+                fast: { type: string }
+                strong: { type: string }
+
+    ModelProfile:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - name
+        - builtin
+        - active
+        - enabled
+        - base_url
+        - api_path
+        - model
+        - model_name
+        - vision
+        - context_window
+        - available
+        - api_key_source
+      description: |
+        一份模型配置的对外视图。**没有密钥字段**：只有来源与末四位提示。
+      properties:
+        id: { type: string, description: 稳定标识；默认档固定为 default }
+        name: { type: string, description: 配置名（列表标题），最多 40 字符 }
+        builtin: { type: boolean, description: true = 来自配置文件主节（默认档），可编辑、不可删除 }
+        active: { type: boolean, description: 是否为当前生效的配置 }
+        enabled: { type: boolean, description: false 时即使密钥齐备也不可用 }
+        base_url: { type: string, description: 网关地址（不含路径前缀），例如 https://api.deepseek.com }
+        api_path:
+          type: string
+          description: 路径前缀，会拼接成 {base_url}{api_path}/chat/completions；地址里已含同样前缀时不重复拼
+          example: /v1
+        model: { type: string, description: 模型ID：发给上游的 model 字段，例如 deepseek-chat }
+        model_name:
+          type: string
+          description: 人可读的模型名，例如 DeepSeek V3.2 Flash；只用于界面展示，留空时客户端回退 model
+        vision: { type: boolean, description: 该模型能否读图；决定附件里的图片是送多模态还是换成一句说明 }
+        context_window:
+          type: integer
+          description: |
+            模型最大上下文窗口（tokens），只用于客户端输入栏的"上下文已用"占比，
+            不参与请求拼装与预算判定。默认档（deepseek-v4.1-flash）为 1000000，
+            新建配置缺省 128000。
+          example: 1000000
+        available: { type: boolean }
+        reason:
+          type: string
+          nullable: true
+          description: 不可用的原因（已停用 / 未填网关地址 / 未填模型ID / 缺少密钥），可直接展示；可用时为空
+        api_key_source:
+          type: string
+          enum: [secrets, env, none]
+          description: secrets = 客户端写入的密钥文件；env = api_key_env 指向的环境变量；none = 都没有
+        api_key_hint:
+          type: string
+          nullable: true
+          description: 末四位提示，形如 …9f2a；密钥过短时为 …（不泄露任何内容）
+          example: …9f2a
+
+    ModelList:
+      type: object
+      additionalProperties: false
+      required: [active_id, persisted, models]
+      properties:
+        active_id: { type: string }
+        persisted:
+          type: boolean
+          description: false = 服务端没有来源配置文件（未传 --config），本次改动重启后会丢
+        models:
+          type: array
+          items: { $ref: '#/components/schemas/ModelProfile' }
+
+    ModelCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [name, base_url, model]
+      properties:
+        name: { type: string, description: 配置名（列表标题），最多 40 字符 }
+        base_url: { type: string, description: 必须以 http:// 或 https:// 开头；不要带 /chat/completions }
+        model: { type: string, description: 模型ID：发给上游的 model 字段，必填 }
+        model_name: { type: string, description: 人可读的模型名，可留空（≤ 60 字符）；留空时界面回退模型ID }
+        api_path: { type: string, default: /v1, description: 留空按 /v1；百炼填 /compatible-mode/v1 }
+        api_key: { type: string, description: 只在写入时使用，永不回显 }
+        api_key_env: { type: string, description: 可选：从哪个环境变量读密钥 }
+        vision: { type: boolean, default: false }
+        context_window:
+          type: integer
+          description: 模型最大上下文窗口（tokens），1000 ~ 100000000；缺省 128000
+          example: 128000
+        enabled: { type: boolean, default: true }
+
+    ModelUpdateRequest:
+      type: object
+      additionalProperties: false
+      description: 全部字段可选；缺省即不改动。
+      properties:
+        name: { type: string }
+        base_url: { type: string }
+        model: { type: string, description: 模型ID：发给上游的 model 字段 }
+        model_name: { type: string, description: 人可读的模型名；显式传空串即清空（界面回退模型ID） }
+        api_path: { type: string }
+        api_key:
+          type: string
+          description: 空串或缺省 = 保留已有密钥（编辑页不回显密钥，留空是常态）
+        clear_api_key: { type: boolean, default: false, description: 显式清空密钥 }
+        api_key_env: { type: string }
+        vision: { type: boolean }
+        context_window:
+          type: integer
+          description: 模型最大上下文窗口（tokens），1000 ~ 100000000；缺省表示不改动
+        enabled: { type: boolean }
+
+    ModelTestRequest:
+      type: object
+      additionalProperties: false
+      description: |
+        给了 `id` 就以已保存的配置打底，其余字段逐个覆盖；没给 id 时必须提供
+        `base_url` 与 `model`。
+      properties:
+        id: { type: string }
+        base_url: { type: string }
+        model: { type: string }
+        api_path: { type: string }
+        api_key: { type: string, description: 为空时复用已保存的密钥 }
+
+    ModelTestResult:
+      type: object
+      additionalProperties: false
+      required: [ok]
+      properties:
+        ok: { type: boolean }
+        latency_ms: { type: integer, description: 仅成功时返回，往返毫秒数 }
+        endpoint: { type: string, description: 实际请求到的完整地址，便于用户核对路径前缀 }
+        error_code:
+          type: string
+          enum:
+            - no_key
+            - invalid_request
+            - auth_failed
+            - model_not_found
+            - endpoint_not_found
+            - unreachable
+            - timeout
+            - rate_limited
+            - bad_response
+        status: { type: integer, nullable: true, description: 上游 HTTP 状态码；网络层失败时为空 }
+        message: { type: string, description: 上游原话（已截断），面向开发者 }
+        hint: { type: string, description: 一句话告诉用户该改什么 }
+
+    ModelWriteResult:
+      type: object
+      additionalProperties: false
+      required: [persisted]
+      properties:
+        model: { $ref: '#/components/schemas/ModelProfile' }
+        persisted: { type: boolean, description: false = 没有来源配置文件，重启后会丢 }
+
+    ModelActivateResult:
+      type: object
+      additionalProperties: false
+      required: [active_id, persisted, available]
+      properties:
+        active_id: { type: string }
+        model: { $ref: '#/components/schemas/ModelProfile' }
+        persisted: { type: boolean }
+        available: { type: boolean, description: false 表示切过去了但用不了，回答会退回确定性实现 }
+        reason: { type: string, nullable: true }
+
+    Approval:
+      type: object
+      required: [id, task_id, action, expires_at, decision]
+      properties:
+        id: { type: string }
+        task_id: { type: string }
+        action:
+          type: string
+          description: '如 submit_form / merge_changes / code.tool_use'
+        target: { type: string }
+        impact: { type: string, description: '金额、影响范围与是否不可撤销' }
+        previews:
+          type: array
+          items: { type: string }
+        scope:
+          type: string
+          enum: [task, tool]
+          default: task
+          description: task = 任务级（如合并确认）；tool = 单次工具调用
+        tool:
+          type: object
+          description: 仅 scope=tool 时存在
+          properties:
+            name: { type: string }
+            risk: { type: string, enum: [read, reversible_write, irreversible_write] }
+            digest: { type: string, description: 脱敏截断后的输入摘要 }
+            rememberable:
+              type: boolean
+              default: false
+              description: >
+                是否提供「本任务内不再询问这类操作」。由服务端按规则计算：
+                凭证、提权、工作树外写入永远为 false；老服务端不返回该字段。
+
+        expires_at: { type: integer, description: Unix 毫秒时间戳 }
+        decision: { type: string, enum: [pending, approved, rejected, expired] }
+
+    ApproveRequest:
+      type: object
+      additionalProperties: false
+      required: [approval_id, decision]
+      properties:
+        approval_id: { type: string }
+        decision: { type: string, enum: [approve, reject] }
+        remember:
+          type: boolean
+          default: false
+          description: >
+            仅 scope=tool 且 decision=approve 时有效：本任务内不再询问同类操作。
+            老客户端不带该字段，行为与升级前一致。
+        remember_scope:
+          type: string
+          enum: [task, session, project]
+          description: >
+            记住多久。缺省按 task（与只有 remember 的老客户端语义一致）；
+            session 24 小时、project 7 天。不可逆动作与合并审批永不建授权。
+
+
+    Artifact:
+      type: object
+      required: [id, task_id, kind, size, created_at]
+      properties:
+        id: { type: string }
+        task_id: { type: string }
+        kind:
+          type: string
+          description: 产物种类；取值来自技能声明的 outputs（内置技能为 plan_table 等）
+        size: { type: integer, description: 正文字节数 }
+        mime: { type: string }
+        created_at: { type: integer, description: Unix 毫秒时间戳 }
+
+    Skill:
+      type: object
+      required: [name, version, source, risk_level, status]
+      properties:
+        name: { type: string }
+        version: { type: string }
+        source: { type: string, enum: [builtin, user, third_party] }
+        risk_level: { type: string, enum: [read, reversible_write, irreversible_write] }
+        required_tools:
+          type: array
+          items: { type: string }
+        plugin_id:
+          type: string
+          description: 所属插件 id；只有 `third_party` 才有。
+        plugin_name:
+          type: string
+          description: 所属插件的展示名，客户端「来源」一栏用它。
+        description:
+          type: string
+          description: Agent Skills 规范里的 `description`：做什么、何时用。
+        status:
+          type: string
+          enum: [supported, degraded, unsupported]
+          description: |
+            `supported` 可运行；
+            `degraded` 可运行但存在风险（如未声明工具却在正文里指挥跑脚本）；
+            `unsupported` 依赖本机没有的工具，不装载、不进下拉与建议。
+        reasons:
+          type: array
+          items: { type: string }
+          description: 降级或不支持的可读原因，直接展示给用户。
+
+    Plugin:
+      type: object
+      required: [id, name, version, enabled, skills, installed_at]
+      properties:
+        id:
+          type: string
+          description: 插件标识。取自 `plugin.json` 的 `name`，缺省用包内顶层目录名。
+        name: { type: string }
+        version:
+          type: string
+          description: 无清单形态记 `0.0.0`。
+        author: { type: string }
+        description: { type: string }
+        enabled:
+          type: boolean
+          description: 停用后其技能立即从候选里消失。
+        installed_at: { type: integer, description: Unix 毫秒时间戳 }
+        updated_at: { type: integer, description: Unix 毫秒时间戳 }
+        skills:
+          type: array
+          items: { $ref: '#/components/schemas/Skill' }
+
+    PluginPage:
+      type: object
+      required: [items, pending_reload]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Plugin' }
+        pending_reload:
+          type: boolean
+          description: |
+            刚安装、启停或卸载过，但执行进程还有任务在跑：改动要等空闲后生效。
+            客户端据此提示「已安装，当前任务结束后生效」。
+
+    PluginStateUpdate:
+      type: object
+      additionalProperties: false
+      required: [enabled]
+      properties:
+        enabled: { type: boolean }
+
+    ThemeColor:
+      type: string
+      description: |
+        `#RRGGBB`（不透明）或 `#AARRGGBB`（带透明度），`#` 可省，大小写不敏感。
+        服务端输出统一带 `#`，不透明时省略 alpha。
+      example: '#3B6EA5'
+
+    ThemeTextColors:
+      type: object
+      additionalProperties: false
+      description: 文字灰阶。缺省的字段由客户端从明暗基线派生。
+      properties:
+        primary: { $ref: '#/components/schemas/ThemeColor' }
+        secondary: { $ref: '#/components/schemas/ThemeColor' }
+        tertiary: { $ref: '#/components/schemas/ThemeColor' }
+        control: { $ref: '#/components/schemas/ThemeColor' }
+        disabled: { $ref: '#/components/schemas/ThemeColor' }
+        on_accent: { $ref: '#/components/schemas/ThemeColor' }
+
+    ThemeStatusColors:
+      type: object
+      additionalProperties: false
+      description: 状态五色。胶囊的 12% 底与 35% 描边由客户端从同一个颜色派生。
+      properties:
+        success: { $ref: '#/components/schemas/ThemeColor' }
+        warning: { $ref: '#/components/schemas/ThemeColor' }
+        danger: { $ref: '#/components/schemas/ThemeColor' }
+        info: { $ref: '#/components/schemas/ThemeColor' }
+        neutral: { $ref: '#/components/schemas/ThemeColor' }
+
+    ThemeSyntaxColors:
+      type: object
+      additionalProperties: false
+      description: 代码块语法高亮，按 highlight.js 的 scope 首段收敛成十一类。
+      properties:
+        keyword: { $ref: '#/components/schemas/ThemeColor' }
+        string: { $ref: '#/components/schemas/ThemeColor' }
+        number: { $ref: '#/components/schemas/ThemeColor' }
+        comment: { $ref: '#/components/schemas/ThemeColor' }
+        function: { $ref: '#/components/schemas/ThemeColor' }
+        type: { $ref: '#/components/schemas/ThemeColor' }
+        variable: { $ref: '#/components/schemas/ThemeColor' }
+        property: { $ref: '#/components/schemas/ThemeColor' }
+        operator: { $ref: '#/components/schemas/ThemeColor' }
+        meta: { $ref: '#/components/schemas/ThemeColor' }
+        invalid: { $ref: '#/components/schemas/ThemeColor' }
+
+    ThemeMessageColors:
+      type: object
+      additionalProperties: false
+      description: 消息流配色：用户气泡、代码块底、元信息文字与分割线。
+      properties:
+        user_bubble: { $ref: '#/components/schemas/ThemeColor' }
+        code_background: { $ref: '#/components/schemas/ThemeColor' }
+        user_text: { $ref: '#/components/schemas/ThemeColor' }
+        meta: { $ref: '#/components/schemas/ThemeColor' }
+        divider: { $ref: '#/components/schemas/ThemeColor' }
+
+    ThemeTerminalColors:
+      type: object
+      additionalProperties: false
+      description: |
+        终端配色：ANSI 十六色 + 光标、选区、附件条。
+        `keyboardAppearance` 这类平台语义不进包，由客户端按 `brightness` 决定。
+      properties:
+        foreground: { $ref: '#/components/schemas/ThemeColor' }
+        background: { $ref: '#/components/schemas/ThemeColor' }
+        cursor: { $ref: '#/components/schemas/ThemeColor' }
+        selection: { $ref: '#/components/schemas/ThemeColor' }
+        black: { $ref: '#/components/schemas/ThemeColor' }
+        red: { $ref: '#/components/schemas/ThemeColor' }
+        green: { $ref: '#/components/schemas/ThemeColor' }
+        yellow: { $ref: '#/components/schemas/ThemeColor' }
+        blue: { $ref: '#/components/schemas/ThemeColor' }
+        magenta: { $ref: '#/components/schemas/ThemeColor' }
+        cyan: { $ref: '#/components/schemas/ThemeColor' }
+        white: { $ref: '#/components/schemas/ThemeColor' }
+        bright_black: { $ref: '#/components/schemas/ThemeColor' }
+        bright_red: { $ref: '#/components/schemas/ThemeColor' }
+        bright_green: { $ref: '#/components/schemas/ThemeColor' }
+        bright_yellow: { $ref: '#/components/schemas/ThemeColor' }
+        bright_blue: { $ref: '#/components/schemas/ThemeColor' }
+        bright_magenta: { $ref: '#/components/schemas/ThemeColor' }
+        bright_cyan: { $ref: '#/components/schemas/ThemeColor' }
+        bright_white: { $ref: '#/components/schemas/ThemeColor' }
+        chrome: { $ref: '#/components/schemas/ThemeColor' }
+        chrome_border: { $ref: '#/components/schemas/ThemeColor' }
+        chrome_foreground: { $ref: '#/components/schemas/ThemeColor' }
+        overlay: { $ref: '#/components/schemas/ThemeColor' }
+
+    ThemeAccentColors:
+      type: object
+      additionalProperties: false
+      description: |
+        强调色：项目琥珀与 SSH 青绿两套渐变，各给开始/结束两色。
+
+        渐变与 `tint`（`lerp(start, end, 0.35)`）由客户端派生，包里不写派生值；
+        不写这两组时沿用内置的项目琥珀与终端青绿。
+      properties:
+        project_start: { $ref: '#/components/schemas/ThemeColor' }
+        project_end: { $ref: '#/components/schemas/ThemeColor' }
+        ssh_start: { $ref: '#/components/schemas/ThemeColor' }
+        ssh_end: { $ref: '#/components/schemas/ThemeColor' }
+
+    ThemeSurfaceColors:
+      type: object
+      additionalProperties: false
+      description: |
+        页面氛围：整窗底色顶部那层淡色（`appSurfaceGradient` 首段）。
+
+        强度 16% 与收敛位置 34% 属于版式常量，不开放；给一个等于
+        `scheme.surface` 的值等于关掉渐变。
+      properties:
+        top_tint: { $ref: '#/components/schemas/ThemeColor' }
+
+    ThemeSchemeColors:
+      type: object
+      additionalProperties: false
+      description: |
+        界面骨架色：直接落到 M3 `ColorScheme`。
+
+        其余分组说的是"画什么"（文字 / 状态 / 语法 / 消息 / 终端），
+        这一组说的是"底和线"——终端仿真类主题要纯黑底与单色描边只能从这里给。
+        只开放客户端真正引用的 14 个角色；未覆盖的角色仍由种子色派生。
+      properties:
+        primary: { $ref: '#/components/schemas/ThemeColor' }
+        on_primary: { $ref: '#/components/schemas/ThemeColor' }
+        primary_container: { $ref: '#/components/schemas/ThemeColor' }
+        on_primary_container: { $ref: '#/components/schemas/ThemeColor' }
+        surface: { $ref: '#/components/schemas/ThemeColor' }
+        surface_container_lowest: { $ref: '#/components/schemas/ThemeColor' }
+        surface_container_low: { $ref: '#/components/schemas/ThemeColor' }
+        surface_container: { $ref: '#/components/schemas/ThemeColor' }
+        surface_container_high: { $ref: '#/components/schemas/ThemeColor' }
+        surface_container_highest: { $ref: '#/components/schemas/ThemeColor' }
+        on_surface: { $ref: '#/components/schemas/ThemeColor' }
+        on_surface_variant: { $ref: '#/components/schemas/ThemeColor' }
+        outline: { $ref: '#/components/schemas/ThemeColor' }
+        outline_variant: { $ref: '#/components/schemas/ThemeColor' }
+
+    ThemeColors:
+      type: object
+      additionalProperties: false
+      description: |
+        全部颜色覆盖。**每个字段都可缺省**：缺省即"沿用内置派生值"。
+        这种稀疏表示让 Flutter 侧的色表保持唯一真源，服务端不复制色值。
+
+        曾经的 `icon` 组（`icon.folder_selected`）已移除：项目列表的文件夹
+        图标改走 `accent.project_start`，不再单独配色。旧包里仍带该段时，
+        服务端按未知字段忽略、安装不会失败。
+      properties:
+        seed:
+          allOf: [{ $ref: '#/components/schemas/ThemeColor' }]
+          description: M3 种子色。改它等于换一整套色阶。
+        scheme: { $ref: '#/components/schemas/ThemeSchemeColors' }
+        text: { $ref: '#/components/schemas/ThemeTextColors' }
+        status: { $ref: '#/components/schemas/ThemeStatusColors' }
+        syntax: { $ref: '#/components/schemas/ThemeSyntaxColors' }
+        message: { $ref: '#/components/schemas/ThemeMessageColors' }
+        terminal: { $ref: '#/components/schemas/ThemeTerminalColors' }
+        accent: { $ref: '#/components/schemas/ThemeAccentColors' }
+        surface: { $ref: '#/components/schemas/ThemeSurfaceColors' }
+
+    ThemeSpec:
+      type: object
+      required: [id, name, version, brightness, colors, installed_at, updated_at]
+      properties:
+        id:
+          type: string
+          description: 主题标识。取自 `theme.json` 的 `id`，也是安装目录名。
+        name: { type: string }
+        version: { type: string }
+        author: { type: string }
+        description: { type: string }
+        brightness:
+          type: string
+          enum: [light, dark]
+          description: 明暗基线。一个包只声明一种，选中后不再跟随系统。
+        colors: { $ref: '#/components/schemas/ThemeColors' }
+        installed_at: { type: integer, description: Unix 毫秒时间戳 }
+        updated_at: { type: integer, description: Unix 毫秒时间戳 }
+
+    ThemePage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/ThemeSpec' }
+
+    PairStatus:
+      type: object
+      required: [request_id, status]
+      properties:
+        request_id: { type: string }
+        status:
+          type: string
+          enum: [pending, awaiting_confirmation, approved, rejected, expired, locked]
+          description: |
+            `pending` 等待客户端提交配对码；
+            `awaiting_confirmation` 等待本机或已配对设备确认；
+            `approved` 已完成，此时才返回服务端公钥与指纹。
+        device_id: { type: [string, 'null'] }
+        server_pubkey: { type: [string, 'null'], description: 服务端 Ed25519 公钥，base32 }
+        server_fingerprint: { type: [string, 'null'], description: 分组显示，供人工核对 }
+
+    DeviceInfo:
+      type: object
+      required: [device_id, name, platform, paired_at]
+      properties:
+        device_id: { type: string }
+        name: { type: string }
+        platform: { type: string }
+        paired_at: { type: integer, description: Unix 毫秒时间戳 }
+
+    RecordingMode:
+      type: string
+      enum: [realtime, batch]
+      description: |
+        `realtime` 边录边传，每段闭合即上传并内联转写；
+        `batch` 录音期间不上传，`complete` 后整体上传并后台转写。
+
+    RecordingStatus:
+      type: string
+      enum: [recording, recorded, transcribing, ready, partial, failed]
+      description: |
+        `recording` 仍在录（已创建未 complete）；`recorded` 已结束、等上传或转写；
+        `partial` 表示部分分段失败但其余可用；`failed` 表示没有可用文本。
+
+    RecordingSegmentState:
+      type: string
+      enum: [stored, transcribing, ready, failed]
+
+    Recording:
+      type: object
+      additionalProperties: false
+      required:
+        [id, client_recording_id, title, mode, status, duration_ms, bytes,
+         segment_count, ready_count, preview, created_at, updated_at]
+      properties:
+        id: { type: string }
+        client_recording_id:
+          type: string
+          description: 客户端生成的稳定标识，用于幂等创建与断点续传。
+        title: { type: string }
+        mode: { $ref: '#/components/schemas/RecordingMode' }
+        status: { $ref: '#/components/schemas/RecordingStatus' }
+        duration_ms: { type: integer, description: 音频总时长（毫秒） }
+        bytes: { type: integer, description: 已上传音频总字节数 }
+        segment_count: { type: integer }
+        ready_count: { type: integer, description: 已成功转写的分段数 }
+        preview: { type: string, description: 转写稿开头一段，供列表预览 }
+        created_at: { type: integer, description: Unix 毫秒时间戳 }
+        updated_at: { type: integer, description: Unix 毫秒时间戳 }
+
+    RecordingCreate:
+      type: object
+      additionalProperties: false
+      required: [client_recording_id, mode]
+      properties:
+        client_recording_id: { type: string, minLength: 1, maxLength: 128 }
+        title: { type: string, maxLength: 200 }
+        mode: { $ref: '#/components/schemas/RecordingMode' }
+
+    RecordingUpdate:
+      type: object
+      additionalProperties: false
+      required: [title]
+      properties:
+        title: { type: string, minLength: 1, maxLength: 200 }
+
+    RecordingSegment:
+      type: object
+      additionalProperties: false
+      required: [seq, start_ms, end_ms, bytes, text, state]
+      properties:
+        seq: { type: integer }
+        start_ms: { type: integer }
+        end_ms: { type: integer }
+        bytes: { type: integer }
+        text: { type: string }
+        state: { $ref: '#/components/schemas/RecordingSegmentState' }
+        error:
+          type: string
+          description: 面向用户的失败原因；仅 `failed` 时下发。
+
+    RecordingDetail:
+      type: object
+      additionalProperties: false
+      required: [recording, segments]
+      properties:
+        recording: { $ref: '#/components/schemas/Recording' }
+        segments:
+          type: array
+          items: { $ref: '#/components/schemas/RecordingSegment' }
+        summary: { $ref: '#/components/schemas/RecordingSummary' }
+
+    SummaryStyle:
+      type: string
+      enum: [minutes, brief, detailed]
+      description: |
+        `minutes` 会议纪要；`brief` 3–5 句简短摘要（新录音默认）；
+        `detailed` 按话题分段的详细摘要。
+
+    SummaryStatus:
+      type: string
+      enum: [none, pending, running, ready, failed]
+
+    SummaryAudioStatus:
+      type: string
+      enum: [none, pending, running, ready, failed]
+
+    SummaryAudioPeaks:
+      type: object
+      additionalProperties: false
+      required: [buckets, peaks]
+      properties:
+        version:
+          type: integer
+          description: 语音版本，等于 `summary.audio_updated_at`；客户端据此缓存。
+        buckets:
+          type: integer
+          description: 桶数，固定 480。
+        peaks:
+          type: array
+          description: 按时间顺序的 0..255 线性幅度峰值。
+          maxItems: 480
+          items:
+            type: integer
+            minimum: 0
+            maximum: 255
+
+    RecordingSummary:
+      type: object
+      additionalProperties: false
+      required: [status, text, audio_status, audio_bytes, audio_truncated, style_preference]
+      properties:
+        status: { $ref: '#/components/schemas/SummaryStatus' }
+        text:
+          type: string
+          description: 总结 Markdown（形式由 `style` 决定）；非 ready 时为空。
+        style:
+          $ref: '#/components/schemas/SummaryStyle'
+        style_preference:
+          $ref: '#/components/schemas/SummaryStyle'
+        error:
+          type: string
+          description: 生成失败原因；成功时省略。
+        model:
+          type: string
+          description: 生成总结使用的模型标识；未生成时省略。
+        updated_at:
+          type: integer
+          description: 最近一次总结状态变化时间（Unix 毫秒）。
+        audio_status: { $ref: '#/components/schemas/SummaryAudioStatus' }
+        audio_error:
+          type: string
+          description: 语音合成失败原因；成功时省略。
+        audio_bytes:
+          type: integer
+          description: 语音文件字节数；未合成时为 0。
+        audio_format:
+          type: string
+          description: 语音格式（mp3 / wav）；未合成时省略。
+        audio_updated_at:
+          type: integer
+          description: 最近一次语音状态变化时间（Unix 毫秒）。
+        audio_truncated:
+          type: boolean
+          description: 总结超过 TTS 文本上限时是否只朗读了前一段。
+
+    RecordingComplete:
+      type: object
+      additionalProperties: false
+      properties:
+        duration_ms:
+          type: integer
+          description: 客户端测得的录音总时长；省略时取最后一段的 end_ms。
+
+    RecordingInfo:
+      type: object
+      additionalProperties: false
+      required: [asr_enabled, asr_available, max_segment_bytes, max_duration_ms, max_total_bytes,
+                 summary_available, tts_enabled, tts_available]
+      properties:
+        asr_enabled:
+          type: boolean
+          description: 服务端是否开启转写（`asr.enabled`）。
+        asr_available:
+          type: boolean
+          description: 开启且密钥/provider 就绪；false 时只归档音频、不出文本。
+        asr_model:
+          type: string
+          description: 实际模型标识；未配置时省略。模型名不进契约语义，客户端只做展示。
+        max_segment_bytes: { type: integer }
+        max_duration_ms: { type: integer }
+        max_total_bytes: { type: integer }
+        summary_available:
+          type: boolean
+          description: 总结模型是否就绪；false 时录音只出转写稿。
+        summary_model:
+          type: string
+          description: 总结使用的模型标识；未配置时省略。
+        summary_default_style:
+          $ref: '#/components/schemas/SummaryStyle'
+        tts_enabled:
+          type: boolean
+          description: 服务端是否开启语音合成。
+        tts_available:
+          type: boolean
+          description: 语音合成是否真的可用（开启 + 密钥 + provider 就绪）。
+        tts_model:
+          type: string
+          description: 语音合成模型标识；未配置时省略。
+        tts_voice:
+          type: string
+          description: 默认音色；未配置时省略。
+
+    RecordingPage:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Recording' }
+        next_cursor: { type: string }

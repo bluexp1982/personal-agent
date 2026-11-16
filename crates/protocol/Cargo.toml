@@ -1,0 +1,15 @@
+[package]
+name = "protocol"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "共享契约类型：与 api-spec/openapi.yaml 对应的 Rust 侧落地"
+
+[dependencies]
+serde.workspace = true
+# 事件序列化与 Task.input 的自由结构需要 serde_json（库内使用，不只是测试）。
+serde_json.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

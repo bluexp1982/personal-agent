@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 底板内缘取色，仅给自适应图标的 background 兜底（前景铺满时不可见）。
+         与启动图标同源导出，换图请整批重出，不要手改。 -->
+    <color name="ic_launcher_background">#050505</color>
+</resources>

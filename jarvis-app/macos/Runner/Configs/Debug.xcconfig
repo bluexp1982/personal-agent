@@ -1,0 +1,8 @@
+#include "../../Flutter/Flutter-Debug.xcconfig"
+#include "Warnings.xcconfig"
+
+// Debug 的 bundle id 不在这里改：本文件挂在 **project** 层，
+// 而 Runner target 的 Debug/Release/Profile 三个配置都以 AppInfo.xcconfig 作为
+// baseConfigurationReference（target 层），优先级更高，会把这里写的值盖掉。
+// Debug 专用的 `com.personalagent.jarvisApp.dev` 写在
+// project.pbxproj 的 Runner target Debug 配置里（PRODUCT_BUNDLE_IDENTIFIER）。

@@ -1,0 +1,59 @@
+[package]
+name = "jarvis-service"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "项目唯一对外服务：业务权威、配对鉴权、任务与审批、管理面"
+
+[[bin]]
+name = "jarvis-service"
+path = "src/main.rs"
+
+[dependencies]
+protocol.workspace = true
+axum.workspace = true
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+sqlx.workspace = true
+daemon-kit.workspace = true
+hyper.workspace = true
+hyper-util.workspace = true
+http-body-util.workspace = true
+ed25519-dalek.workspace = true
+sha2.workspace = true
+base32.workspace = true
+subtle.workspace = true
+rand.workspace = true
+reqwest.workspace = true
+base64.workspace = true
+async-trait.workspace = true
+futures-util.workspace = true
+tokio-util.workspace = true
+rustls.workspace = true
+tokio-rustls.workspace = true
+rcgen.workspace = true
+
+# 总结语音波形：纯 Rust 解码，不引入 ffmpeg 之类的系统依赖。
+symphonia.workspace = true
+
+# 文件工具（read_file / search_file / search_content）。
+globset.workspace = true
+ignore.workspace = true
+regex.workspace = true
+
+# 技能包解包。
+zip.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+tower.workspace = true
+http-body-util.workspace = true
+
+[lints]
+workspace = true

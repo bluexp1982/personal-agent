@@ -1,0 +1,36 @@
+{"id":"e01","label":"active","source":"我一般周三下午有空，其他时间都排满了","assertion":"用户周三下午有空","quote":"我一般周三下午有空","span":"周三下午","confidence":0.9}
+{"id":"e02","label":"active","source":"我们报销走飞书，别走邮件","assertion":"报销流程走飞书","quote":"报销走飞书","span":"飞书","confidence":0.85}
+{"id":"e03","label":"active","source":"回答的时候先给结论，再给依据","assertion":"用户希望回答先给结论再给依据","quote":"先给结论，再给依据","span":"先给结论","confidence":0.9}
+{"id":"e04","label":"active","source":"这个服务的时间统一用毫秒，不要用秒","assertion":"项目约定时间统一用毫秒","quote":"时间统一用毫秒","span":"统一用毫秒","confidence":0.88}
+{"id":"e05","label":"active","source":"我的主力机器是 MacBook Pro 十四寸 M3","assertion":"用户主力机器是 MacBook Pro 14 寸 M3","quote":"主力机器是 MacBook Pro 十四寸 M3","span":"MacBook Pro","confidence":0.92}
+{"id":"e06","label":"active","source":"家里养了一只柴犬叫豆豆","assertion":"用户养了一只柯基，名字叫豆豆","quote":"养了一只柯基叫豆豆","span":"柯基","confidence":0.9}
+{"id":"e07","label":"active","source":"数据库用 SQLite 加 WAL，不要换","assertion":"数据库选型是 SQLite 加 WAL","quote":"数据库用 SQLite 加 WAL","span":"SQLite","confidence":0.86}
+{"id":"e08","label":"active","source":"迁移只前滚，不写 down","assertion":"迁移策略只前滚，不写回滚脚本","quote":"迁移只前滚，不写 down","span":"只前滚","confidence":0.87}
+{"id":"e09","label":"active","source":"十月二十四日与 A 公司谈续约，卡在价格上","assertion":"10 月 24 日与 A 公司续约谈判卡在价格","quote":"十月二十四日与 A 公司谈续约，卡在价格上","span":"卡在价格","confidence":0.83}
+{"id":"e10","label":"active","source":"不吃香菜，也不吃辣","assertion":"用户不吃香菜与辣","quote":"不吃香菜，也不吃辣","span":"不吃香菜","confidence":0.9}
+{"id":"e11","label":"active","source":"每周五晚上去游泳，一般八点","assertion":"用户每周五晚八点游泳","quote":"每周五晚上去游泳","span":"每周五晚上","confidence":0.85}
+{"id":"e12","label":"active","source":"客户那边的对接人是王工","assertion":"客户对接人是王工","quote":"对接人是王工","span":"王工","confidence":0.88}
+{"id":"e13","label":"candidate","source":"我下周一要给客户演示新版本","assertion":"用户下周一要给客户演示","quote":"下周一要给客户演示","span":null,"confidence":0.9}
+{"id":"e14","label":"candidate","source":"团队里前端是小陈，测试是老周","assertion":"团队前端是陈工","quote":"前端是小陈","span":null,"confidence":0.82}
+{"id":"e15","label":"candidate","source":"每个月一号交房租，六千五","assertion":"用户每月一号交房租","quote":"每个月一号交房租","span":"六千五","confidence":0.9}
+{"id":"e16","label":"candidate","source":"路由器是华硕 AX86U，放在客厅","assertion":"用户路由器型号是华硕 AX86U","quote":"路由器是华硕 AX86U","span":"放在客厅","confidence":0.86}
+{"id":"e17","label":"candidate","source":"我可能比较喜欢看悬疑小说吧","assertion":"用户喜欢悬疑小说","quote":"喜欢看悬疑小说","span":"悬疑小说","confidence":0.45}
+{"id":"e18","label":"candidate","source":"好像说了要提前一天预约","assertion":"用户要求提前一天预约","quote":"提前一天预约","span":"一天","confidence":0.55}
+{"id":"e19","label":"candidate","source":"有空可以一起爬山","assertion":"用户想去爬山","quote":"一起爬山","span":null,"confidence":0.5}
+{"id":"e20","label":"candidate","source":"上周去医院复查了颈椎，医生说还行","assertion":"用户上周复查颈椎","quote":"上周去医院复查了颈椎","span":"医生说还行","confidence":0.8}
+{"id":"e21","label":"candidate","source":"年终奖一般在一月发","assertion":"年终奖一月发放","quote":"年终奖一般在一月发","span":"","confidence":0.75}
+{"id":"e22","label":"candidate","source":"我不用微信，只用飞书","assertion":"用户不用微信","quote":"我不用微信","span":null,"confidence":0.88}
+{"id":"e23","label":"reject","reason":"quote_mismatch","source":"我一般周三下午有空，其他时间都排满了","assertion":"用户周三下午有空","quote":"我一般周四下午有空","span":"周四下午","confidence":0.9}
+{"id":"e24","label":"reject","reason":"quote_mismatch","source":"数据库用 SQLite 加 WAL，不要换","assertion":"数据库用 PostgreSQL","quote":"数据库用 PostgreSQL","span":"PostgreSQL","confidence":0.95}
+{"id":"e25","label":"reject","reason":"quote_mismatch","source":"家里养了一只柴犬叫豆豆","assertion":"用户养了一只金毛","quote":"家里养了一只金毛","span":"金毛","confidence":0.9}
+{"id":"e26","label":"reject","reason":"quote_mismatch","source":"十月二十四日与 A 公司谈续约，卡在价格上","assertion":"与 A 公司已签约","quote":"与 A 公司已经签约完成","span":"签约","confidence":0.8}
+{"id":"e27","label":"reject","reason":"quote_mismatch","source":"提交前必须跑 flutter analyze","assertion":"提交前必须跑 cargo test","quote":"提交前必须跑 cargo test","span":"cargo test","confidence":0.9}
+{"id":"e28","label":"reject","reason":"quote_mismatch","source":"下周一要给客户演示新版本","assertion":"演示改到周三","quote":"演示改到周三","span":"周三","confidence":0.7}
+{"id":"e29","label":"reject","reason":"secret","source":"我的 key 是 sk-abcdefghijklmnop1234，别外传","assertion":"用户的 key 是 sk-abcdefghijklmnop1234","quote":"我的 key 是 sk-abcdefghijklmnop1234","span":"sk-abcdefghijklmnop1234","confidence":0.99}
+{"id":"e30","label":"reject","reason":"secret","source":"AWS 访问密钥 AKIAIOSFODNN7EXAMPLE 存在环境变量里","assertion":"AWS 密钥是 AKIAIOSFODNN7EXAMPLE","quote":"AKIAIOSFODNN7EXAMPLE","span":"AKIAIOSFODNN7EXAMPLE","confidence":0.95}
+{"id":"e31","label":"reject","reason":"secret","source":"-----BEGIN RSA PRIVATE KEY-----MIICXAIBAAKBgQC7","assertion":"私钥内容是一段 RSA 私钥","quote":"-----BEGIN RSA PRIVATE KEY-----","span":"RSA PRIVATE KEY","confidence":0.9}
+{"id":"e32","label":"reject","reason":"secret","source":"我的身份证号 11010519491231002X 你记一下","assertion":"11010519491231002X","quote":"11010519491231002X","span":"11010519491231002X","confidence":0.99}
+{"id":"e33","label":"reject","reason":"secret","source":"工资卡号 4111111111111111 别弄错","assertion":"4111111111111111","quote":"4111111111111111","span":"4111111111111111","confidence":0.98}
+{"id":"e34","label":"private","source":"我的工资是一万八，每月十五号发","assertion":"用户月薪一万八","quote":"我的工资是一万八","span":"一万八","confidence":0.9}
+{"id":"e35","label":"private","source":"数据库密码：Abc12345，记一下别忘了","assertion":"数据库密码：Abc12345","quote":"数据库密码：Abc12345","span":"Abc12345","confidence":0.9}
+{"id":"e36","label":"private","source":"上个月体检报告出来了，血脂偏高","assertion":"用户血脂偏高","quote":"体检报告出来了，血脂偏高","span":"血脂偏高","confidence":0.85}
